@@ -194,13 +194,22 @@ export function App() {
     lastRoute.current = routeKey;
     setThreadId(null);
   }, [routeKey]);
+  /*
+   * Navigation callbacks read `nav` through a ref so their own identity is fixed.
+   *
+   * They are handed to every row in the feed, and rows are memoised on their
+   * props — depending on `nav` directly meant a new function on each navigation
+   * state change, which changed every row's props and defeated the memoisation.
+   */
+  const navRef = useRef(nav);
+  navRef.current = nav;
   const openProfile = useCallback(
-    (pubkey: string) => nav.go({ name: "profile", pubkey }),
-    [nav],
+    (pubkey: string) => navRef.current.go({ name: "profile", pubkey }),
+    [],
   );
   const openHashtag = useCallback(
-    (tag: string) => nav.go({ name: "hashtag", tag }),
-    [nav],
+    (tag: string) => navRef.current.go({ name: "hashtag", tag }),
+    [],
   );
 
   return (

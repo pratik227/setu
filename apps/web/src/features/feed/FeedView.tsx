@@ -1,6 +1,6 @@
 import { Button, cn, EmptyState, ScrollArea, Skeleton } from "@setu/ui";
 import { ArrowUp, Inbox } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { NoteRowActions } from "../notes/NoteActionRow";
 import { NoteCard } from "../notes/NoteCard";
 import { useRenderedContent } from "../notes/NoteContent";
@@ -23,7 +23,25 @@ import { useProvenance } from "../notes/useProvenance";
  * is unchanged. Memoising against freshly built objects would compare unequal
  * every time and skip nothing.
  */
-const NoteRow = memo(function NoteRow({
+/**
+ * One feed row.
+ *
+ * Deliberately **not** `React.memo`, and the reason is measured rather than
+ * assumed. `toNoteViews` now keeps a row's view object stable when nothing about
+ * it changed, which is the prerequisite — but the `actions` object handed to every
+ * row carries per-row transient state (`pendingFor`, `noticeFor`, `errorFor`) that
+ * changes whenever *any* row acts or a publish state moves. So `actions` is a new
+ * identity on nearly every render, and a memo comparing it skips nothing.
+ *
+ * Instrumented against a live feed: 8 feed re-renders x 80 rows = 640 row renders,
+ * with memo and without. Identical. A memo there costs a comparison per row per
+ * render and buys nothing, which is worse than no memo at all.
+ *
+ * Making it pay off means splitting that transient state out of the shared object
+ * so each row sees only its own — a change to `NoteRowActions`, `NoteCard` and
+ * `NoteActionRow`. Worth doing; not worth pretending is already done.
+ */
+function NoteRow({
   note,
   provenanceRelays,
   actions,
@@ -40,8 +58,6 @@ const NoteRow = memo(function NoteRow({
   /** Fired when the reader leaves the top, so newer rows can be staged. */
   /** Fired on return to the top, so staged rows can flow in again. */
 }) {
-  // TEMP-INSTRUMENT
-  (globalThis as any).__noteRenders = ((globalThis as any).__noteRenders ?? 0) + 1;
   const { body, media } = useRenderedContent({
     content: note.content,
     onOpenHashtag,
@@ -61,7 +77,7 @@ const NoteRow = memo(function NoteRow({
       {...(actions ? { actions } : {})}
     />
   );
-});
+}
 
 function NoteSkeleton() {
   return (

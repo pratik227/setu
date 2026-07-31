@@ -1,0 +1,69 @@
+# Netlify deployment for the Setu web client.
+#
+# This is a pnpm workspace, so the build runs from the repository root and the
+# publish directory points into the app. Building from `apps/web` instead would put
+# pnpm outside the workspace and it would refuse to resolve the `@setu/*` packages.
+
+[build]
+  base = ""
+  command = "pnpm --filter @setu/web build"
+  publish = "apps/web/dist"
+
+[build.environment]
+  # Matches the root `engines.node`. Netlify's default is older than this repo
+  # supports, and the failure surfaces as a confusing esbuild error rather than a
+  # version complaint.
+  NODE_VERSION = "22"
+
+# pnpm is detected from `pnpm-lock.yaml` and the version from `packageManager` in
+# the root package.json — no configuration needed, so none is invented here.
+#
+# esbuild's postinstall (which fetches its platform binary, without which Vite
+# cannot build) is permitted by `allowBuilds` in `pnpm-workspace.yaml`. That file is
+# committed, so a clean install on Netlify honours it without a build flag.
+
+# Single-page app: every path is served by the client router.
+#
+# `200` rather than `301` so the URL the visitor typed is the URL they keep — a
+# redirect would rewrite `/settings` to `/` in the address bar and lose the route.
+# Placed last because Netlify applies the first matching rule, and a catch-all
+# above the headers block would shadow nothing but is easy to misread.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # A Nostr client talks to arbitrary relays, arbitrary media hosts and arbitrary
+    # NIP-05 domains, which is why the connect/img rules are wide. Everything that
+    # can be tightened is.
+    #
+    # `frame-ancestors 'none'` and `X-Frame-Options` both appear on purpose: the CSP
+    # directive is the modern one, the header is what older browsers honour, and a
+    # client holding a signing key must not be framable — clickjacking a "sign this
+    # event" prompt is the attack that matters here.
+    # One line on purpose: an HTTP header value cannot contain a newline, and a
+    # TOML """ block preserves them. Written out rather than trusting the host to
+    # collapse it.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    # No camera, microphone or geolocation is ever needed, and a compromised
+    # dependency should not be able to ask.
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+
+# Hashed assets are immutable; the HTML must never be.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    # `must-revalidate` rather than a long max-age: the HTML names the hashed
+    # bundles, so a cached copy pins visitors to an old deploy indefinitely.
+    Cache-Control = "public, max-age=0, must-revalidate"

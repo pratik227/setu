@@ -30,6 +30,19 @@ const NOTICE_MS = 4000;
 export function useNoteRowActions(
   events: ReadonlyMap<string, NostrEvent>,
 ): NoteRowActions {
+  /*
+   * The events map is read through a ref, not closed over.
+   *
+   * Callers rebuild it whenever the feed changes — which is on every arriving
+   * reaction — so closing over it made every callback, and therefore this whole
+   * object, a new identity on each tick. Rows are memoised on their props, so a
+   * churning `actions` object defeated the memoisation entirely: measured at 462
+   * row renders where 462 was also the un-memoised number.
+   *
+   * A ref keeps the lookups current while the returned API stays stable.
+   */
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
   const engine = useEngine();
   const { session } = useSession();
   const noteActions = useNoteActions();
@@ -72,43 +85,43 @@ export function useNoteRowActions(
 
   const react = useCallback(
     (noteId: string, active: boolean) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       void (active ? noteActions.unreact(event) : noteActions.react(event));
     },
-    [events, noteActions],
+    [noteActions],
   );
 
   const repost = useCallback(
     (noteId: string, active: boolean) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       void (active ? noteActions.unrepost(event) : noteActions.repost(event));
     },
-    [events, noteActions],
+    [noteActions],
   );
 
   const bookmark = useCallback(
     (noteId: string) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       void bookmarks.toggle(event);
     },
-    [bookmarks, events],
+    [bookmarks],
   );
 
   const zap = useCallback(
     (noteId: string) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       void zapping.zap(event);
     },
-    [events, zapping],
+    [zapping],
   );
 
   const share = useCallback(
     (noteId: string) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       setShareBusy((previous) => new Set(previous).add(noteId));
       void (async () => {
@@ -144,7 +157,7 @@ export function useNoteRowActions(
         }
       })();
     },
-    [engine, events, notice],
+    [engine, notice],
   );
 
   const pendingFor = useCallback(
@@ -198,7 +211,7 @@ export function useNoteRowActions(
 
   const renderReplyComposer = useCallback(
     (noteId: string, close: () => void, authorName?: string) => {
-      const parent = events.get(noteId);
+      const parent = eventsRef.current.get(noteId);
       if (!parent) return null;
       return (
         <Composer
@@ -214,25 +227,25 @@ export function useNoteRowActions(
         />
       );
     },
-    [events],
+    [],
   );
 
   const canDelete = useCallback(
     (noteId: string) => {
       if (!canSign || !session) return false;
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       return event !== undefined && event.pubkey === session.pubkey;
     },
-    [canSign, events, session],
+    [canSign, session],
   );
 
   const deleteNote = useCallback(
     (noteId: string) => {
-      const event = events.get(noteId);
+      const event = eventsRef.current.get(noteId);
       if (!event) return;
       void noteActions.deleteNote(event);
     },
-    [events, noteActions],
+    [noteActions],
   );
 
   return useMemo(
