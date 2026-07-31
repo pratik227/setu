@@ -4,7 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "description": "Setu \u2014 a Nostr social client for web and desktop",
+  "description": "Setu \u2014 a Nostr social client for web and desktop ",
   "packageManager": "pnpm@11.4.0",
   "engines": {
     "node": ">=22"

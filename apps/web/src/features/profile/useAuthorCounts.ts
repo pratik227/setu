@@ -9,7 +9,8 @@ import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_RELAYS, useEngine } from "../../engine/EngineProvider";
 
 /**
- * How many notes and articles an author has — asked of relays, not counted locally.
+ * How many notes, articles and followers an author has — asked of relays, not
+ * counted locally.
  *
  * This replaces counting rows in the local store, which was honest about being a
  * local sample but reported 22 where the real figure was 388. The gap is not a bug
@@ -39,6 +40,21 @@ export interface AuthorCounts {
   readonly notes: AggregatedCount;
   readonly replies: AggregatedCount;
   readonly reads: AggregatedCount;
+  /**
+   * How many kind-3 lists these relays hold that name this author.
+   *
+   * A follower count, and it is a *lower bound* in a stronger sense than the others.
+   * `notes` is bounded because a relay may not hold every note; this is bounded
+   * because nobody publishes their followers at all. The edge only exists inside
+   * other people's contact lists, so the honest ceiling on what any client can say is
+   * "this many of the lists these relays happen to hold" — and `countAggregate`'s
+   * `max`-not-`sum` rule matters more here than anywhere, since a popular account's
+   * followers overlap almost completely between relays.
+   *
+   * `useAuthorFollowing` is the other direction and needs none of this hedging:
+   * following is a list its own author publishes.
+   */
+  readonly followers: AggregatedCount;
   /** True while at least one COUNT is in flight. */
   readonly loading: boolean;
   /** False when no configured relay implements NIP-45. */
@@ -49,6 +65,7 @@ const EMPTY: AuthorCounts = {
   notes: NO_COUNT,
   replies: NO_COUNT,
   reads: NO_COUNT,
+  followers: NO_COUNT,
   loading: false,
   supported: false,
 };
@@ -94,9 +111,13 @@ export function useAuthorCounts(pubkey: string | undefined): AuthorCounts {
     };
 
     void (async () => {
-      const [notes, reads] = await Promise.all([
+      const [notes, reads, followers] = await Promise.all([
         ask({ kinds: [Kind.ShortTextNote], authors: [pubkey] }),
         ask({ kinds: [Kind.LongFormArticle], authors: [pubkey] }),
+        // Followers, by the only route there is: count the contact lists that name
+        // this author. `#p`, not `authors` — this asks about lists *other people*
+        // wrote, which is the whole reason the figure cannot be exact.
+        ask({ kinds: [Kind.Contacts], "#p": [pubkey] }),
       ]);
       if (cancelled) return;
       setCounts({
@@ -105,6 +126,7 @@ export function useAuthorCounts(pubkey: string | undefined): AuthorCounts {
         // substituting the local figure. See the note above.
         replies: NO_COUNT,
         reads,
+        followers,
         loading: false,
         supported: true,
       });

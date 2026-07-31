@@ -35,6 +35,7 @@ import { nip05DisplayName } from "../profiles/nip05";
 import type { ProfileDetails } from "../profiles/profileContent";
 import { useNip05 } from "../profiles/useNip05";
 import type { AuthorCounts } from "./useAuthorCounts";
+import { useAuthorFollowing } from "./useAuthorFollowing";
 import type { LocalAuthorCounts } from "./useLocalCounts";
 
 /** Copy-to-clipboard, with the "copied" state resetting itself. */
@@ -170,6 +171,31 @@ export function ProfileHeader({
   const relayCountHint = fromRelays
     ? `Highest figure reported by ${relayCounts.notes.answered} of ${relayCounts.notes.asked} relays that support counting. The true total may be higher.`
     : undefined;
+
+  /*
+   * The two social counts, which come from opposite places and say different things.
+   *
+   * Following is exact: it is the author's own kind-3, and its `p` tags are the answer
+   * rather than a sample of it. So it renders whenever the list has arrived, with no
+   * hedging and independent of whether any relay supports COUNT.
+   *
+   * Followers cannot be exact for anyone. Nobody publishes their followers — the edge
+   * lives only inside other people's contact lists — so the best available figure is
+   * how many such lists our relays hold, which is a floor. It is omitted entirely
+   * rather than shown as 0 when no relay can answer: "0 followers" on an account with
+   * thousands is a worse statement than no statement.
+   */
+  const followersLabel =
+    relayCounts && relayCounts.supported
+      ? formatCount(relayCounts.followers)
+      : undefined;
+  const followersHint =
+    followersLabel !== undefined
+      ? `At least this many contact lists naming them were found on ${relayCounts?.followers.answered} of ${relayCounts?.followers.asked} relays. Nobody publishes their own follower count, so no client can state it exactly.`
+      : undefined;
+  // Named for the list, not the verb: the `following` *prop* means "the viewer
+  // follows this profile", which is a different question entirely.
+  const theirFollows = useAuthorFollowing(pubkey);
   const [bioOpen, setBioOpen] = useState(false);
   const [dialog, setDialog] = useState<"mute" | "report" | undefined>();
   const { session } = useSession();
@@ -425,6 +451,31 @@ export function ProfileHeader({
             <span className="text-2xs text-muted-foreground/80">
               {fromRelays ? "counted by your relays" : "held locally"}
             </span>
+          </div>
+
+          {/*
+           * A second row, not more pills in the first.
+           *
+           * The row above ends in a caption that qualifies every figure in it
+           * ("counted by your relays" / "held locally"). Following is neither — it is
+           * the author's own published list — so putting it up there would put an
+           * exact number under a caption that says it was sampled.
+           */}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {theirFollows.loaded ? (
+              <CountPill
+                value={String(theirFollows.count)}
+                label="following"
+                title="Exact: the accounts named in this profile's own contact list."
+              />
+            ) : null}
+            {followersLabel !== undefined ? (
+              <CountPill
+                value={followersLabel}
+                label="followers"
+                {...(followersHint ? { title: followersHint } : {})}
+              />
+            ) : null}
           </div>
         </div>
       </div>
