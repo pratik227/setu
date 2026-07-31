@@ -55,6 +55,14 @@
     # dependency should not be able to ask.
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
 
+# The service worker must revalidate on every check, or an old worker pins its
+# holder to old routing logic for as long as the cache header says — the same
+# trap as a cached index.html, one level down.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
 # Hashed assets are immutable; the HTML must never be.
 [[headers]]
   for = "/assets/*"

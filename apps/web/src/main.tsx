@@ -7,6 +7,7 @@ import { EngineProvider } from "./engine/EngineProvider";
 import { DirectMessagesProvider } from "./features/chat/DirectMessagesProvider";
 import { SessionProvider } from "./features/identity/SessionProvider";
 import { SettingsSyncProvider } from "./features/sync/SettingsSyncProvider";
+import { registerOfflineShell } from "./registerSw";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -53,3 +54,6 @@ createRoot(container).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+// After mount, not before: the worker helps the next launch, not this one.
+registerOfflineShell();

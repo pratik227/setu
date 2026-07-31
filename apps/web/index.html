@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Setu</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Matches theme-init.js's FLAT_BG light value; the boot script repaints
+         the real theme before first frame either way. -->
+    <meta name="theme-color" content="#fbfaf9" />
     <!--
       Anti-FOUC boot script. Paint the background and the
       light/dark class from the cached theme choice *before* the bundle loads,
