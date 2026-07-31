@@ -23,6 +23,9 @@ import {
 import type { Scheduler } from "../internal/scheduler";
 import { ExpirationIndex, isExpiredAt } from "./expiration";
 import { addressOf, isEphemeralKind, KIND_DELETION } from "./kinds";
+import type { MuteRules } from "./muteFilter";
+import type { MuteAwareEventStore } from "./muteIngest";
+import { MuteIngestPolicy } from "./muteIngest";
 import { ObserverRegistry } from "./observers";
 import { isProtected } from "./protection";
 import type { IndexStats } from "./queryPlan";
@@ -59,7 +62,7 @@ export interface EventStoreOptions {
 }
 
 /** In-memory event store. See the module doc for the semantics it defines. */
-export class MemoryEventStore implements EventStore {
+export class MemoryEventStore implements EventStore, MuteAwareEventStore {
   private readonly byId = new Map<Hex32, StoredEvent>();
   private readonly byKind = new Map<number, Set<Hex32>>();
   private readonly byAuthor = new Map<Hex32, Set<Hex32>>();
@@ -69,6 +72,8 @@ export class MemoryEventStore implements EventStore {
   /** `kind:pubkey:dTag` -> the id of the version currently held. */
   private readonly byAddress = new Map<string, Hex32>();
   private readonly tombstones = new TombstoneIndex();
+  /** The reader's mute rules, enforced on the write path. See `muteIngest.ts`. */
+  private readonly mutes = new MuteIngestPolicy();
   /** Soonest-first deadlines of the events that carry a NIP-40 expiration. */
   private readonly expirations = new ExpirationIndex();
   private readonly observers: ObserverRegistry;
@@ -101,6 +106,10 @@ export class MemoryEventStore implements EventStore {
   /** Number of events carrying a NIP-40 deadline. Diagnostics only. */
   get expiringCount(): number {
     return this.expirations.size;
+  }
+
+  setMuteRules(rules: MuteRules, viewerPubkey?: Hex32 | undefined): void {
+    this.mutes.update(rules, viewerPubkey);
   }
 
   async put(event: NostrEvent, relay?: string): Promise<boolean> {
@@ -273,6 +282,10 @@ export class MemoryEventStore implements EventStore {
     }
 
     if (this.tombstones.blocks(event)) return { accepted: false, touched };
+    // After the tombstone check and before the dedup check, so a muted author's
+    // reaction is refused whether or not we have seen it before — otherwise a row
+    // already held would keep being "accepted: false, but still stored".
+    if (this.mutes.blocks(event)) return { accepted: false, touched };
 
     const existing = this.byId.get(event.id);
     if (existing !== undefined) {

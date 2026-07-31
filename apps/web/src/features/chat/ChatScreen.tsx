@@ -16,8 +16,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../identity/SessionProvider";
 import { relativeTime } from "../notes/relativeTime";
 import { useAuthors } from "../profiles/useAuthors";
+import { useDirectMessages } from "./DirectMessagesProvider";
 import { planDmDelivery, undeliverableMessage } from "./dmDelivery";
-import { useDirectMessages, useReadMarks } from "./useDirectMessages";
+import { isConversationUnread } from "./unreadConversations";
 import { type DmRelayLists, useDmRelayLists } from "./useDmRelayLists";
 import { useSendMessage } from "./useSendMessage";
 
@@ -50,9 +51,16 @@ export interface ChatScreenProps {
 
 export function ChatScreen({ onOpenProfile }: ChatScreenProps) {
   const { session } = useSession();
-  const { conversations, loading, undecryptable, canRead } =
-    useDirectMessages();
-  const { lastReadAt, markRead } = useReadMarks();
+  // The app's inbox, not this screen's: the subscription and the decryption cache
+  // outlive the screen so a message arriving on another route is still received.
+  const {
+    conversations,
+    loading,
+    undecryptable,
+    canRead,
+    lastReadAt,
+    markRead,
+  } = useDirectMessages();
   const [openId, setOpenId] = useState<string | undefined>();
 
   const open = useMemo(
@@ -122,11 +130,13 @@ export function ChatScreen({ onOpenProfile }: ChatScreenProps) {
                   key={conversation.id}
                   conversation={conversation}
                   active={conversation.id === openId}
-                  unread={
-                    conversation.lastMessage.sender !== session.pubkey &&
-                    conversation.updatedAt >
-                      (lastReadAt.get(conversation.id) ?? 0)
-                  }
+                  // The same predicate the sidebar badge counts with, so a lit
+                  // badge always has a bold row to point at.
+                  unread={isConversationUnread(
+                    conversation,
+                    session.pubkey,
+                    lastReadAt,
+                  )}
                   title={conversationTitle(conversation, nameOf)}
                   avatarUrl={
                     authors.get(conversation.others[0] ?? "")?.avatarUrl

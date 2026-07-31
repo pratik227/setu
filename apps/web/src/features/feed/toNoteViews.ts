@@ -69,6 +69,7 @@ function sameView(a: NoteView, b: NoteView): boolean {
     a.viewerReacted === b.viewerReacted &&
     a.viewerReposted === b.viewerReposted &&
     a.countsApproximate === b.countsApproximate &&
+    a.countsMutedOut === b.countsMutedOut &&
     a.justArrived === b.justArrived &&
     a.contentWarning === b.contentWarning &&
     a.media === b.media &&
@@ -170,6 +171,12 @@ export function toNoteViews(
       viewerReposted: counts.viewerReposted,
       ...(media ? { media } : {}),
       ...(counts.approximate ? { countsApproximate: true } : {}),
+      // A scalar, and absent rather than 0, so it costs the row memo nothing. The
+      // counts above already exclude these; carrying the figure is what lets the row
+      // say so instead of just showing a smaller number.
+      ...(counts.mutedOut !== undefined
+        ? { countsMutedOut: counts.mutedOut }
+        : {}),
       ...(reposters.length > 0 ? { repostedBy: reposters } : {}),
       ...(hasWarning
         ? {

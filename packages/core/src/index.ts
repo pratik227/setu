@@ -113,11 +113,15 @@ export {
   NO_MUTES,
   occursAsWord,
 } from "./store/muteFilter";
-export type { MuteIngestOptions } from "./store/muteIngest";
+export type {
+  MuteAwareEventStore,
+  MuteIngestOptions,
+} from "./store/muteIngest";
 export {
   MUTE_REFUSABLE_KINDS,
   MuteIngestPolicy,
   mutedAtIngest,
+  supportsMuteIngest,
 } from "./store/muteIngest";
 export type { ObserverRegistryOptions } from "./store/observers";
 export { ObserverRegistry } from "./store/observers";

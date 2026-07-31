@@ -85,7 +85,16 @@ export function ThreadView({
   );
   const { actions, statuses } = useNoteRowActions(eventsById);
 
-  const replyCount = tree.replies.length;
+  /*
+   * The count in the header is of *readable* replies.
+   *
+   * `tree.replies.length` counted muted ones too, which is the bug this closes: the
+   * feed row's reply count already excludes them, so a row saying "2 replies" opened a
+   * thread whose header said 3. Two numbers about the same thing disagreeing reads as
+   * a counting bug, and the reader has no way to discover it was a rule they set — so
+   * the difference is stated rather than just subtracted.
+   */
+  const replyCount = tree.replies.length - tree.mutedReplies;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -94,6 +103,11 @@ export function ThreadView({
         {status === "ready" && replyCount > 0 ? (
           <span className="text-xs text-muted-foreground tabular-nums">
             {replyCount} {replyCount === 1 ? "reply" : "replies"}
+          </span>
+        ) : null}
+        {status === "ready" && tree.mutedReplies > 0 ? (
+          <span className="text-2xs text-muted-foreground">
+            · {tree.mutedReplies} muted
           </span>
         ) : null}
         {onClose ? (
@@ -139,6 +153,9 @@ export function ThreadView({
                   note={view}
                   actions={actions}
                   status={statuses.get(view.id)}
+                  {...(slot.mutedReason
+                    ? { mutedReason: slot.mutedReason }
+                    : {})}
                   {...(onOpenThread ? { onOpenThread } : {})}
                   {...(onOpenProfile ? { onOpenProfile } : {})}
                   {...(onOpenHashtag ? { onOpenHashtag } : {})}
@@ -157,7 +174,10 @@ export function ThreadView({
               />
             ) : null}
 
-            {replyCount === 0 ? (
+            {/* `tree.replies`, not `replyCount`: when every reply is muted the count
+                is 0 but the placeholders below are real rows, and "No replies yet"
+                above them would contradict what is on screen. */}
+            {tree.replies.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">
                 No replies yet.
               </p>
@@ -173,6 +193,9 @@ export function ThreadView({
                     status={statuses.get(view.id)}
                     depth={reply.depth}
                     orphaned={reply.orphaned}
+                    {...(reply.mutedReason
+                      ? { mutedReason: reply.mutedReason }
+                      : {})}
                     {...(onOpenThread ? { onOpenThread } : {})}
                     {...(onOpenProfile ? { onOpenProfile } : {})}
                     {...(onOpenHashtag ? { onOpenHashtag } : {})}

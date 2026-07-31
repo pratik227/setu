@@ -172,3 +172,36 @@ export class MuteIngestPolicy {
     this.viewer = undefined;
   }
 }
+
+/**
+ * A store that can be told the reader's mute rules.
+ *
+ * A separate interface rather than a member of {@link ../contracts.EventStore}, for
+ * the same reason {@link ./retention.EvictingEventStore} is separate: it is a
+ * *capability*, not part of what makes something an event store. A test double, an
+ * in-memory fixture, or a future remote-backed store is a perfectly complete
+ * `EventStore` without it, and widening the core contract would break every one of
+ * them to add a hook only two implementations can honour.
+ *
+ * Callers feature-detect with {@link supportsMuteIngest} instead of assuming.
+ */
+export interface MuteAwareEventStore {
+  /**
+   * Replace the mute rules the write path enforces.
+   *
+   * **Forward-looking only.** Nothing already stored is evicted — see the module
+   * doc: an eviction here would turn a reading preference into an irreversible
+   * delete. Safe to call on every tick; an unchanged list costs one reference
+   * comparison.
+   */
+  setMuteRules(rules: MuteRules, viewerPubkey?: Hex32 | undefined): void;
+}
+
+/** True when this store enforces mute rules on its write path. */
+export function supportsMuteIngest<T>(
+  store: T,
+): store is T & MuteAwareEventStore {
+  return (
+    typeof (store as { setMuteRules?: unknown }).setMuteRules === "function"
+  );
+}

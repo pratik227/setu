@@ -29,6 +29,9 @@
 
 import type { Filter, Hex32, NostrEvent, Timestamp } from "@setu/protocol";
 import type { EventStore, StoredEvent, Unsubscribe } from "../contracts";
+import type { MuteRules } from "./muteFilter";
+import type { MuteAwareEventStore } from "./muteIngest";
+import { supportsMuteIngest } from "./muteIngest";
 import type { EvictingEventStore, RetentionPolicy } from "./retention";
 
 export interface FallbackEventStoreOptions {
@@ -66,12 +69,15 @@ function closeQuietly(store: EventStore | undefined): void {
   }
 }
 
-export class FallbackEventStore implements EventStore {
+export class FallbackEventStore implements EventStore, MuteAwareEventStore {
   private readonly options: FallbackEventStoreOptions;
   private primary: EventStore | undefined;
   private active: EventStore;
   private degraded = false;
   private readonly watchers = new Set<Watcher>();
+  /** Last mute rules set, replayed onto the fallback when it is built. */
+  private muteRules: MuteRules | undefined;
+  private muteViewer: Hex32 | undefined;
 
   constructor(options: FallbackEventStoreOptions) {
     this.options = options;
@@ -128,6 +134,28 @@ export class FallbackEventStore implements EventStore {
   }
 
   /**
+   * Forwards the reader's mute rules, and remembers them.
+   *
+   * Remembering is the load-bearing half. The fallback store is *built lazily*, at
+   * the moment persistence fails, which is long after the app told the store what is
+   * muted. Forwarding without recording would mean a browser that lost IndexedDB
+   * mid-session silently stops enforcing mutes — the one moment when nobody is
+   * looking for a moderation regression.
+   */
+  setMuteRules(rules: MuteRules, viewerPubkey?: Hex32 | undefined): void {
+    this.muteRules = rules;
+    this.muteViewer = viewerPubkey;
+    this.applyMuteRules(this.active);
+  }
+
+  /** Hands the recorded rules to a store, if that store can take them. */
+  private applyMuteRules(store: EventStore): void {
+    if (this.muteRules === undefined) return;
+    if (!supportsMuteIngest(store)) return;
+    store.setMuteRules(this.muteRules, this.muteViewer);
+  }
+
+  /**
    * NIP-40 sweep plus retention eviction, forwarded only if the active store
    * implements it — the in-memory fallback has nothing to reclaim, since it dies
    * with the tab.
@@ -180,6 +208,9 @@ export class FallbackEventStore implements EventStore {
     this.degraded = true;
     const fallback = this.options.createFallback();
     this.active = fallback;
+    // Before any observer is re-attached, so no write can land on a store that has
+    // not been told what the reader muted.
+    this.applyMuteRules(fallback);
     for (const watcher of this.watchers) {
       watcher.unsubscribe();
       watcher.unsubscribe = fallback.observe(watcher.filter, watcher.onChange);

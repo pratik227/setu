@@ -19,6 +19,7 @@ import { DEFAULT_RELAYS } from "../engine/EngineProvider";
 import { ArticlesScreen } from "../features/articles/ArticlesScreen";
 import { ReadsScreen } from "../features/articles/ReadsScreen";
 import { ChatScreen } from "../features/chat/ChatScreen";
+import { useDirectMessages } from "../features/chat/DirectMessagesProvider";
 import { ComposeDialog } from "../features/compose/ComposeDialog";
 import { DiscoverPanel } from "../features/discover/DiscoverPanel";
 import { ExploreScreen } from "../features/explore/ExploreScreen";
@@ -34,6 +35,7 @@ import { LoginScreen, UnlockDialog } from "../features/identity/LoginScreen";
 import { useSession } from "../features/identity/SessionProvider";
 import { useFollowAction } from "../features/identity/useFollowAction";
 import { useFollows } from "../features/identity/useFollows";
+import { useMuteIngest } from "../features/moderation/useMuteIngest";
 import { BookmarksScreen } from "../features/notes/BookmarksScreen";
 import { MentionsScreen } from "../features/notifications/MentionsScreen";
 import { NotificationsScreen } from "../features/notifications/NotificationsScreen";
@@ -173,7 +175,16 @@ export function App() {
   const follows = useFollows();
   const followAction = useFollowAction();
   const unread = useUnreadCount();
+  // Read from the app-wide inbox rather than the Messages screen, which is the
+  // point: a badge that only counts while you are looking at the list is not one.
+  const { unreadCount: unreadMessages } = useDirectMessages();
   const nav = useNavigation();
+
+  // The mute list reaches the store's write path from here, not from a screen:
+  // most events are written by subscriptions nowhere near the surface a reader
+  // muted somebody from. See `useMuteIngest`.
+  useMuteIngest();
+
   const [threadId, setThreadId] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
@@ -319,6 +330,7 @@ export function App() {
           // composer that will fail at the last step is not.
           onCompose={() => (locked ? setUnlocking(true) : setComposing(true))}
           unreadNotifications={unread}
+          unreadMessages={unreadMessages}
           pinnedHashtags={nav.pinnedHashtags}
           onUnpinHashtag={nav.unpinHashtag}
         />

@@ -299,8 +299,15 @@ export function countInteractions(
  * that produced it. It names the mute list, because "9 hidden" on a number the
  * reader did not knowingly filter is a bug report, while "your mute list" is an
  * explanation and points at the thing to change.
+ *
+ * Takes the one field it reads rather than a whole {@link NoteInteractions}, so the
+ * row can call it with a `NoteView` — which carries the same figure as
+ * `countsMutedOut` and has no reason to reconstruct a tally object to ask a question
+ * about one number.
  */
-export function mutedCountNotice(counts: NoteInteractions): string | undefined {
+export function mutedCountNotice(counts: {
+  readonly mutedOut?: number;
+}): string | undefined {
   const removed = counts.mutedOut ?? 0;
   if (removed === 0) return undefined;
   return `${removed} ${

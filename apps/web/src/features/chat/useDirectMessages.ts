@@ -72,7 +72,17 @@ export interface DirectMessagesApi {
 
 const NO_MESSAGES: readonly ChatMessage[] = [];
 
-export function useDirectMessages(): DirectMessagesApi {
+/**
+ * The inbox itself. Mounted once, by `DirectMessagesProvider`.
+ *
+ * Not called from a screen, and that is a fix rather than a preference. It used to
+ * live in `ChatScreen`, which meant the gift-wrap REQ existed only while Messages was
+ * on screen: a message arriving while the user was reading Home was invisible until
+ * they happened to navigate over, so there could be no unread badge anywhere else. It
+ * also meant the decryption cache died with the screen, so *every visit* re-opened the
+ * entire inbox — hundreds of ECDH operations to display a list that had not changed.
+ */
+export function useDirectMessagesState(): DirectMessagesApi {
   const engine = useEngine();
   const { session } = useSession();
   const viewer = session?.pubkey;
@@ -168,13 +178,25 @@ export function useDirectMessages(): DirectMessagesApi {
     [messages, viewer],
   );
 
-  return {
-    conversations,
-    messages,
-    loading: loading && canRead,
-    undecryptable,
-    canRead,
-  };
+  /*
+   * Memoised, and it matters now that this is read through a context.
+   *
+   * A fresh object each render would give the context a new value on every store tick
+   * that touches a gift wrap, and `App` consumes that context for the sidebar badge —
+   * so the whole tree would re-render because a wrap arrived. Every field here is a
+   * scalar or an already-memoised array, so this holds its identity for as long as the
+   * inbox genuinely has not changed.
+   */
+  return useMemo(
+    () => ({
+      conversations,
+      messages,
+      loading: loading && canRead,
+      undecryptable,
+      canRead,
+    }),
+    [conversations, messages, loading, undecryptable, canRead],
+  );
 }
 
 /**

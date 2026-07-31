@@ -608,3 +608,52 @@ describe("noteEventsIn", () => {
     expect(events.get(wrapper.id)).toBe(wrapper);
   });
 });
+
+describe("toNoteViews muted counts", () => {
+  it("carries mutedOut onto the row so it can be disclosed", () => {
+    const entry = noteEntry();
+    const [view] = toNoteViews(
+      [entry],
+      new Map(),
+      new Map([[entry.event.id, counts({ replies: 3, mutedOut: 9 })]]),
+      0,
+    );
+    // The counts already exclude the nine; carrying the figure is what lets the row
+    // say so rather than just showing a smaller number.
+    expect(view?.replyCount).toBe(3);
+    expect(view?.countsMutedOut).toBe(9);
+  });
+
+  it("omits the field entirely when nothing was removed", () => {
+    const entry = noteEntry();
+    const [view] = toNoteViews(
+      [entry],
+      new Map(),
+      new Map([[entry.event.id, counts({ replies: 3 })]]),
+      0,
+    );
+    expect(view?.countsMutedOut).toBeUndefined();
+  });
+
+  it("treats a change in mutedOut as a changed row", () => {
+    // Without this in `sameView`, editing the mute list would leave every row
+    // rendering the previous disclosure — a stale "9 not counted" beside numbers
+    // that no longer exclude anything.
+    const entry = noteEntry();
+    const first = toNoteViews(
+      [entry],
+      new Map(),
+      new Map([[entry.event.id, counts({ replies: 3, mutedOut: 9 })]]),
+      0,
+    );
+    const second = toNoteViews(
+      [entry],
+      new Map(),
+      new Map([[entry.event.id, counts({ replies: 3 })]]),
+      0,
+      first,
+    );
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0]?.countsMutedOut).toBeUndefined();
+  });
+});

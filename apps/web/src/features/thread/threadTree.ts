@@ -12,6 +12,12 @@
  * `@setu/protocol` already handles marked and legacy positional `e` tags.
  */
 
+import {
+  isMuteRulesEmpty,
+  type MuteReason,
+  type MuteRules,
+  mutedReason,
+} from "@setu/core";
 import { eTags, type NostrEvent, rootAndReplyIds } from "@setu/protocol";
 
 /**
@@ -35,7 +41,13 @@ export const MAX_MISSING_IDS = 32;
  * case into the first would silently reparent a reply onto its grandparent.
  */
 export type AncestorSlot =
-  | { readonly type: "note"; readonly id: string; readonly event: NostrEvent }
+  | {
+      readonly type: "note";
+      readonly id: string;
+      readonly event: NostrEvent;
+      /** Set when the reader's mute list covers this ancestor. See {@link ThreadReply.mutedReason}. */
+      readonly mutedReason?: MuteReason;
+    }
   | { readonly type: "missing"; readonly id: string };
 
 export interface ThreadReply {
@@ -49,6 +61,22 @@ export interface ThreadReply {
    * rather than dropped. Flagged so the row can say so.
    */
   readonly orphaned: boolean;
+  /**
+   * Which mute rule covers this reply, when one does.
+   *
+   * **Flagged, never removed from the tree**, and that is the whole design. A muted
+   * reply is load-bearing structure: drop the node and every reply *below* it loses
+   * its parent, so the reader's own answer reparents to the root of a conversation it
+   * does not belong to. Muting one account would visibly corrupt a thread the reader
+   * is in — the same argument `muteIngest.ts` makes for never refusing a reply at
+   * ingest, one layer up.
+   *
+   * So the node stays, keeps its children, and the row renders a collapsed
+   * placeholder instead of the body. The reader can still open it: a mute is a
+   * reading preference, not a seal, and a placeholder that cannot be expanded turns
+   * "I would rather not read this" into "you may not".
+   */
+  readonly mutedReason?: MuteReason;
 }
 
 export interface ThreadTree {
@@ -62,6 +90,15 @@ export interface ThreadTree {
   readonly replies: readonly ThreadReply[];
   /** Ids the thread references but does not hold — what is worth fetching. */
   readonly missingIds: readonly string[];
+  /**
+   * How many replies in the tree the reader's mute list covers.
+   *
+   * Reported so the panel's "N replies" can count what is readable while still
+   * disclosing the difference. Without it the header would silently disagree with the
+   * feed row that opened it — the row's count already excludes muted replies, so a row
+   * saying "2 replies" opening a thread that listed 3 reads as a counting bug.
+   */
+  readonly mutedReplies: number;
 }
 
 export interface BuildThreadOptions {
@@ -69,6 +106,40 @@ export interface BuildThreadOptions {
   readonly events: readonly NostrEvent[];
   readonly focusedId: string;
   readonly maxIndentDepth?: number;
+  /**
+   * The reader's mute list. Omitted means nothing is muted.
+   *
+   * Applied here rather than at the rows because the *structure* has to know: see
+   * {@link ThreadReply.mutedReason}.
+   */
+  readonly muteRules?: MuteRules;
+  /**
+   * The reader's own key, never muted from them.
+   *
+   * A word rule is about what the reader wants to read from others; unchecked it
+   * swallows their own reply the instant they post it, which in a thread reads as the
+   * reply having failed to send.
+   */
+  readonly viewerPubkey?: string | undefined;
+}
+
+/**
+ * Which rule covers an event, or undefined when none does.
+ *
+ * A closure built once per `buildThread` call so the empty-rules case — the
+ * overwhelming majority — costs one check rather than one per node.
+ */
+type MuteLookup = (event: NostrEvent) => MuteReason | undefined;
+
+function muteLookupFor(
+  rules: MuteRules | undefined,
+  viewerPubkey: string | undefined,
+): MuteLookup {
+  if (rules === undefined || isMuteRulesEmpty(rules)) return () => undefined;
+  return (event) => {
+    if (event.pubkey === viewerPubkey) return undefined;
+    return mutedReason(event, rules);
+  };
 }
 
 /** Oldest first — the reading order for a conversation. */
@@ -105,10 +176,15 @@ function walkAncestors(
   focused: NostrEvent,
   declaredRoot: string | undefined,
   missing: Set<string>,
+  isMutedBy: MuteLookup,
 ): AncestorWalk {
   const slots: AncestorSlot[] = [];
   const visited = new Set<string>([focused.id]);
   let current = focused;
+  const muted = (event: NostrEvent) => {
+    const reason = isMutedBy(event);
+    return reason ? { mutedReason: reason } : {};
+  };
 
   for (;;) {
     const parentId = parentIdOf(current);
@@ -124,7 +200,12 @@ function walkAncestors(
       missing.add(parentId);
       break;
     }
-    slots.push({ type: "note", id: parent.id, event: parent });
+    slots.push({
+      type: "note",
+      id: parent.id,
+      event: parent,
+      ...muted(parent),
+    });
     current = parent;
   }
 
@@ -136,7 +217,7 @@ function walkAncestors(
     const root = index.get(declaredRoot);
     if (root === undefined) missing.add(declaredRoot);
     else {
-      slots.unshift({ type: "note", id: root.id, event: root });
+      slots.unshift({ type: "note", id: root.id, event: root, ...muted(root) });
       visited.add(root.id);
     }
   }
@@ -163,6 +244,7 @@ function buildReplies(
   excluded: ReadonlySet<string>,
   maxIndent: number,
   missing: Set<string>,
+  isMutedBy: MuteLookup,
 ): readonly ThreadReply[] {
   const children = new Map<string, NostrEvent[]>();
   for (const event of index.values()) {
@@ -189,11 +271,15 @@ function buildReplies(
       const node = stack.pop() as { event: NostrEvent; rawDepth: number };
       if (visited.has(node.event.id)) continue;
       visited.add(node.event.id);
+      const reason = isMutedBy(node.event);
       replies.push({
         event: node.event,
         depth: Math.min(node.rawDepth, maxIndent),
         rawDepth: node.rawDepth,
         orphaned: false,
+        // Kept in the tree, flagged. The descent below continues through it, which
+        // is the point: its children keep a parent.
+        ...(reason ? { mutedReason: reason } : {}),
       });
       const kids = children.get(node.event.id) ?? [];
       for (let i = kids.length - 1; i >= 0; i -= 1) {
@@ -225,7 +311,14 @@ function buildReplies(
   for (const orphan of orphans) {
     if (visited.has(orphan.id)) continue;
     visited.add(orphan.id);
-    replies.push({ event: orphan, depth: 1, rawDepth: 1, orphaned: true });
+    const reason = isMutedBy(orphan);
+    replies.push({
+      event: orphan,
+      depth: 1,
+      rawDepth: 1,
+      orphaned: true,
+      ...(reason ? { mutedReason: reason } : {}),
+    });
     expand(orphan.id, 2);
   }
 
@@ -246,6 +339,7 @@ export function buildThread(options: BuildThreadOptions): ThreadTree {
 
   const missing = new Set<string>();
   const focused = index.get(focusedId);
+  const isMutedBy = muteLookupFor(options.muteRules, options.viewerPubkey);
 
   if (focused === undefined) {
     // Nothing to project yet. The focused id is the one thing worth fetching.
@@ -255,6 +349,7 @@ export function buildThread(options: BuildThreadOptions): ThreadTree {
       focused: undefined,
       replies: [],
       missingIds: [focusedId],
+      mutedReplies: 0,
     };
   }
 
@@ -268,6 +363,7 @@ export function buildThread(options: BuildThreadOptions): ThreadTree {
     focused,
     declaredRoot,
     missing,
+    isMutedBy,
   );
 
   const replies = buildReplies(
@@ -277,6 +373,7 @@ export function buildThread(options: BuildThreadOptions): ThreadTree {
     visited,
     maxIndent,
     missing,
+    isMutedBy,
   );
 
   const missingIds: string[] = [];
@@ -286,7 +383,23 @@ export function buildThread(options: BuildThreadOptions): ThreadTree {
     missingIds.push(id);
   }
 
-  return { rootId, ancestors: slots, focused, replies, missingIds };
+  let mutedReplies = 0;
+  for (const reply of replies) {
+    if (reply.mutedReason !== undefined) mutedReplies += 1;
+  }
+
+  // The focused note is deliberately never flagged: opening a thread is an explicit
+  // request to read *this* note, and collapsing the thing the reader just asked for
+  // is a client overruling them. It matters most for a muted *thread*, where the rule
+  // matches every event tagging the root — including the note the reader opened.
+  return {
+    rootId,
+    ancestors: slots,
+    focused,
+    replies,
+    missingIds,
+    mutedReplies,
+  };
 }
 
 /** Distinct pubkeys the tree needs author metadata for. */

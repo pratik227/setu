@@ -40,6 +40,14 @@ export interface SetuSidebarProps {
   onOpenSearch(): void;
   onCompose(): void;
   unreadNotifications: number;
+  /**
+   * Conversations with an unread message.
+   *
+   * A real count, not a dot: the inbox is decrypted at the app root, so this is the
+   * same number the conversation list marks bold rather than a guess made from the
+   * gift wraps. See `unreadConversations.ts` for why nothing cheaper would be true.
+   */
+  unreadMessages: number;
   pinnedHashtags: readonly string[];
   onUnpinHashtag?(tag: string): void;
 }
@@ -50,6 +58,7 @@ export function SetuSidebar({
   onOpenSearch,
   onCompose,
   unreadNotifications,
+  unreadMessages,
   pinnedHashtags,
   onUnpinHashtag,
 }: SetuSidebarProps) {
@@ -106,6 +115,7 @@ export function SetuSidebar({
           size="lg"
           active={sameRoute(route, { name: "messages" })}
           onClick={() => onNavigate({ name: "messages" })}
+          trailing={<CountBadge count={unreadMessages} />}
         >
           Messages
         </SidebarRow>

@@ -130,6 +130,17 @@ export interface NoteView {
    * approximate one.
    */
   readonly countsApproximate?: boolean;
+  /**
+   * How many interactions the reader's own mute list removed from the counts above.
+   *
+   * Absent rather than `0` when nothing was removed. Carried because a count that
+   * quietly got smaller is indistinguishable from a bug: a note with three visible
+   * answers showing "3 replies" when the reader remembers twelve reads as lost data,
+   * while the same number with "9 not counted — your mute list" reads as the rule
+   * working. One figure across replies, reposts and reactions together; a per-kind
+   * breakdown would be a list of who the reader muted, which they did not ask for.
+   */
+  readonly countsMutedOut?: number;
   /** Set when the viewer has already acted, so the button renders active. */
   readonly viewerReacted?: boolean;
   readonly viewerReposted?: boolean;

@@ -1,6 +1,7 @@
 import { cn } from "@setu/ui";
 import {
   Bookmark,
+  EyeOff,
   Heart,
   Link2,
   Loader2,
@@ -9,6 +10,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { mutedCountNotice } from "./interactionCounts";
 import { countLabel } from "./relativeTime";
 import type { NoteView } from "./types";
 
@@ -320,6 +322,8 @@ export function NoteActionRow({
         />
       </div>
 
+      <MutedCountNotice note={note} />
+
       {status?.notice ? (
         <p className="mt-1 text-2xs break-all text-muted-foreground">
           {status.notice}
@@ -329,6 +333,29 @@ export function NoteActionRow({
         <p className="mt-1 text-2xs text-destructive">{status.error}</p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * What this note's counts leave out, when the reader's mute list removed something.
+ *
+ * A visible line rather than a `title` on the count buttons, which is where this
+ * started. A tooltip is invisible on a touch screen, invisible to a keyboard, and
+ * unreliably announced by screen readers — so it cannot carry the *only* explanation
+ * for a number that does not match what the reader remembers. Once the line is there,
+ * a tooltip repeating it four times (once per counted control) is noise.
+ *
+ * Renders nothing in the overwhelmingly common case of an empty or non-matching mute
+ * list, so the row costs a null check.
+ */
+function MutedCountNotice({ note }: { note: NoteView }) {
+  const notice = mutedCountNotice({ mutedOut: note.countsMutedOut });
+  if (!notice) return null;
+  return (
+    <p className="mt-1 flex items-start gap-1.5 text-2xs text-muted-foreground">
+      <EyeOff aria-hidden className="mt-0.5 size-3 shrink-0" />
+      <span className="min-w-0">{notice}</span>
+    </p>
   );
 }
 
@@ -347,18 +374,24 @@ function NoteCountRow({ note }: { note: NoteView }) {
     [<Zap key="z" />, "sats zapped", note.zapSats],
   ];
   return (
-    <div className="mt-1.5 flex items-center gap-3 text-2xs text-muted-foreground tabular-nums">
-      {items.map(([icon, label, count]) => (
-        <span key={label} className="flex items-center gap-1.5">
-          <span aria-hidden className="[&_svg]:size-3.5 [&_svg]:shrink-0">
-            {icon}
+    <>
+      <div className="mt-1.5 flex items-center gap-3 text-2xs text-muted-foreground tabular-nums">
+        {items.map(([icon, label, count]) => (
+          <span key={label} className="flex items-center gap-1.5">
+            <span aria-hidden className="[&_svg]:size-3.5 [&_svg]:shrink-0">
+              {icon}
+            </span>
+            <span className={count === 0 ? "opacity-40" : undefined}>
+              {countLabel(count, note.countsApproximate)}
+            </span>
+            <span className="sr-only">{label}</span>
           </span>
-          <span className={count === 0 ? "opacity-40" : undefined}>
-            {countLabel(count, note.countsApproximate)}
-          </span>
-          <span className="sr-only">{label}</span>
-        </span>
-      ))}
-    </div>
+        ))}
+      </div>
+      {/* Here too: the numbers are filtered on this surface for exactly the same
+          reason, so leaving the disclosure to the interactive variant would make
+          the honesty depend on which screen you happened to be on. */}
+      <MutedCountNotice note={note} />
+    </>
   );
 }

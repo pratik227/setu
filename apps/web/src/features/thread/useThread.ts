@@ -23,6 +23,8 @@ import { Kind, type NostrEvent, rootAndReplyIds } from "@setu/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
 import { idLookupLimit } from "../../engine/queryLimits";
+import { useSession } from "../identity/SessionProvider";
+import { useMuteRules } from "../moderation/useMuteList";
 import { NOTE_TARGET_KINDS } from "../notes/noteKinds";
 import { buildThread, MAX_MISSING_IDS, type ThreadTree } from "./threadTree";
 
@@ -64,6 +66,11 @@ interface Scope {
  */
 export function useThread(noteId: string): ThreadState {
   const engine = useEngine();
+  // Mutes are applied to the *tree*, not to the rows, because a muted reply has to
+  // keep its place in the structure or its children orphan. See `ThreadReply`.
+  const { rules: muteRules, rulesKey } = useMuteRules();
+  const { session } = useSession();
+  const viewerPubkey = session?.pubkey;
 
   const [held, setHeld] = useState<ReadonlyMap<string, NostrEvent>>(EMPTY_HELD);
   const [probeDone, setProbeDone] = useState(false);
@@ -169,8 +176,18 @@ export function useThread(noteId: string): ThreadState {
   // --- the projection -------------------------------------------------------
   const events = useMemo(() => [...held.values()], [held]);
   const tree = useMemo(
-    () => buildThread({ events, focusedId: noteId }),
-    [events, noteId],
+    () =>
+      buildThread({
+        events,
+        focusedId: noteId,
+        muteRules,
+        ...(viewerPubkey ? { viewerPubkey } : {}),
+      }),
+    // `rulesKey` is the value identity of `muteRules`; depending on it means editing
+    // the list rebuilds the tree, and a store tick that re-emits an equal list does
+    // not. Rebuilding on every tick would defeat the row memoisation the thread
+    // shares with the feed.
+    [events, noteId, muteRules, rulesKey, viewerPubkey],
   );
 
   // --- grow the id interest set from what the tree says it lacks -------------

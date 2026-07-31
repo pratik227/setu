@@ -1,6 +1,8 @@
+import type { MuteReason } from "@setu/core";
 import { encodeNote, truncateNpub } from "@setu/protocol";
-import { cn } from "@setu/ui";
-import { CornerDownRight, HelpCircle } from "lucide-react";
+import { Button, cn } from "@setu/ui";
+import { CornerDownRight, EyeOff, HelpCircle } from "lucide-react";
+import { useState } from "react";
 import { useSession } from "../identity/SessionProvider";
 import type { NoteRowActions, NoteRowStatus } from "../notes/NoteActionRow";
 import { NoteCard } from "../notes/NoteCard";
@@ -36,6 +38,14 @@ export interface ThreadRowProps {
   focused?: boolean;
   /** Parent was never retrieved, so the row says so instead of implying depth. */
   orphaned?: boolean;
+  /**
+   * Which mute rule covers this note, when one does. Renders collapsed.
+   *
+   * The row is still *here* — see `ThreadReply.mutedReason` for why removing it would
+   * orphan the replies below — and can still be expanded, because a mute is a reading
+   * preference and not a seal.
+   */
+  mutedReason?: MuteReason;
   onOpenThread?(id: string): void;
   onOpenProfile?(pubkey: string): void;
   onOpenHashtag?(tag: string): void;
@@ -54,10 +64,20 @@ export function ThreadRow({
   depth = 0,
   focused = false,
   orphaned = false,
+  mutedReason,
   onOpenThread,
   onOpenProfile,
   onOpenHashtag,
 }: ThreadRowProps) {
+  /*
+   * Revealed per row, and reset when the row stops being muted.
+   *
+   * `useState` keyed on nothing is deliberate: revealing is a decision about *this*
+   * reading of the thread, not a preference. Editing the mute list rebuilds the tree
+   * and the row unmounts, which is the correct forgetting.
+   */
+  const [revealed, setRevealed] = useState(false);
+  const hidden = mutedReason !== undefined && !revealed;
   // Tags, not just content: without them a deprecated `#[2]` mention renders as
   // those literal characters, and a quote repost carrying only a `q` tag has
   // nothing for the renderer to embed. Same gap the feed row had.
@@ -100,21 +120,91 @@ export function ThreadRow({
           Replies to a note we could not retrieve
         </p>
       ) : null}
-      <NoteCard
-        note={withMedia}
-        body={body}
-        {...(focused
-          ? { reactions: <ReactionRow reactions={reactions} /> }
-          : {})}
-        {...(actions ? { actions } : {})}
-        {...(status ? { status } : {})}
-        onOpenProfile={onOpenProfile}
-        {...(focused ? {} : { onOpenThread })}
-        className={cn(
-          focused &&
-            "bg-muted/40 border-l-2 border-l-primary/70 hover:bg-muted/40",
-        )}
-      />
+      {hidden ? (
+        <MutedRowPlaceholder
+          reason={mutedReason as MuteReason}
+          author={note.author.displayName}
+          onReveal={() => setRevealed(true)}
+        />
+      ) : (
+        <>
+          {mutedReason !== undefined ? (
+            <p className="flex items-center gap-1.5 px-4 pt-2 text-2xs text-muted-foreground">
+              <EyeOff aria-hidden className="size-3 shrink-0" />
+              {mutedLabel(mutedReason)} — shown because you asked
+            </p>
+          ) : null}
+          <NoteCard
+            note={withMedia}
+            body={body}
+            {...(focused
+              ? { reactions: <ReactionRow reactions={reactions} /> }
+              : {})}
+            {...(actions ? { actions } : {})}
+            {...(status ? { status } : {})}
+            onOpenProfile={onOpenProfile}
+            {...(focused ? {} : { onOpenThread })}
+            className={cn(
+              focused &&
+                "bg-muted/40 border-l-2 border-l-primary/70 hover:bg-muted/40",
+            )}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** How to name the rule that hid a row, in the reader's terms. */
+function mutedLabel(reason: MuteReason): string {
+  switch (reason) {
+    case "author":
+      return "Muted account";
+    case "hashtag":
+      return "Muted hashtag";
+    case "word":
+      return "Muted word";
+    case "thread":
+      return "Muted thread";
+  }
+}
+
+/**
+ * A muted reply, collapsed but present.
+ *
+ * Present because the tree needs it: removing the node reparents every reply below it
+ * (see `ThreadReply.mutedReason`). Expandable because a mute is a reading preference
+ * the reader set, not a restriction placed on them — and in a thread they are often
+ * reading precisely to follow who said what.
+ *
+ * The rule is named rather than just "hidden": "muted word" tells the reader which of
+ * their own settings did this and therefore what to change, while "hidden" invites
+ * them to file a bug.
+ */
+function MutedRowPlaceholder({
+  reason,
+  author,
+  onReveal,
+}: {
+  reason: MuteReason;
+  author: string;
+  onReveal(): void;
+}) {
+  return (
+    <div className="border-b border-border/50 px-4 py-2.5">
+      <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2">
+        <EyeOff
+          aria-hidden
+          className="size-3.5 shrink-0 text-muted-foreground"
+        />
+        <p className="min-w-0 flex-1 text-2xs text-muted-foreground">
+          <span className="font-medium">{mutedLabel(reason)}</span>
+          {reason === "author" ? ` — ${author}` : null}
+        </p>
+        <Button variant="ghost" size="xs" onClick={onReveal}>
+          Show
+        </Button>
+      </div>
     </div>
   );
 }

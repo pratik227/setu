@@ -27,6 +27,9 @@ import {
 import { expirationOf, isExpiredAt } from "./expiration";
 import { addressOf, isEphemeralKind, KIND_DELETION } from "./kinds";
 import type { EventStoreOptions } from "./memoryStore";
+import type { MuteRules } from "./muteFilter";
+import type { MuteAwareEventStore } from "./muteIngest";
+import { MuteIngestPolicy } from "./muteIngest";
 import { ObserverRegistry } from "./observers";
 import { chooseIndex, sortAndLimit } from "./queryPlan";
 import {
@@ -107,9 +110,13 @@ class SetuDatabase extends Dexie {
 }
 
 /** IndexedDB-backed event store. */
-export class DexieEventStore implements EventStore, EvictingEventStore {
+export class DexieEventStore
+  implements EventStore, EvictingEventStore, MuteAwareEventStore
+{
   private readonly db: SetuDatabase;
   private readonly tombstones = new TombstoneIndex();
+  /** The reader's mute rules, enforced on the write path. See `muteIngest.ts`. */
+  private readonly mutes = new MuteIngestPolicy();
   private readonly observers: ObserverRegistry;
   private readonly matches: MatchesFilterFn;
   private readonly isValidShape: IsValidEventShapeFn;
@@ -156,6 +163,10 @@ export class DexieEventStore implements EventStore, EvictingEventStore {
   /** The IndexedDB database name in use. */
   get databaseName(): string {
     return this.db.name;
+  }
+
+  setMuteRules(rules: MuteRules, viewerPubkey?: Hex32 | undefined): void {
+    this.mutes.update(rules, viewerPubkey);
   }
 
   async put(event: NostrEvent, relay?: string): Promise<boolean> {
@@ -398,6 +409,9 @@ export class DexieEventStore implements EventStore, EvictingEventStore {
     }
 
     if (this.tombstones.blocks(event)) return { accepted: false, touched };
+    // Synchronous, and deliberately so: this runs inside the write queue, and an
+    // await here would open a window for a rule change to land mid-decision.
+    if (this.mutes.blocks(event)) return { accepted: false, touched };
 
     const existing = await this.db.events.get(event.id);
     if (existing !== undefined) {

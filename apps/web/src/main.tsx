@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { EngineProvider } from "./engine/EngineProvider";
+import { DirectMessagesProvider } from "./features/chat/DirectMessagesProvider";
 import { SessionProvider } from "./features/identity/SessionProvider";
 import { SettingsSyncProvider } from "./features/sync/SettingsSyncProvider";
 import "./styles.css";
@@ -38,7 +39,12 @@ createRoot(container).render(
                 app starts rather than only where settings are displayed. See
                 SettingsSyncProvider for why there is exactly one of it. */}
               <SettingsSyncProvider>
-                <App />
+                {/* The private-message inbox is held open here for the same reason:
+                  a gift-wrap subscription that only exists while the Messages
+                  screen is mounted cannot tell anyone they have mail. */}
+                <DirectMessagesProvider>
+                  <App />
+                </DirectMessagesProvider>
               </SettingsSyncProvider>
             </EngineProvider>
           </SessionProvider>
