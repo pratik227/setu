@@ -34,6 +34,27 @@ export interface OutboxRouterOptions {
   readonly maxRelaysPerAuthor?: number;
   /** Max distinct relays in a single routing result. Default 8. */
   readonly maxRelaysPerQuery?: number;
+  /**
+   * Order the fallback set for the kinds being routed. Optional, synchronous.
+   *
+   * This exists because every fallback below is *capped* — `slice(0, 3)` — so the
+   * order decides which relays are consulted at all for an author with no relay
+   * list. Without the hook that decision belongs to the order the user typed
+   * their relay list in, which is no decision: a profile lookup can miss the one
+   * relay that specialises in profiles because it sits fourth in a list of four.
+   * The engine wires this to the measured scorecard (`relayScorecardSource.ts`),
+   * so the front of the fallback is the relays that have actually delivered the
+   * kinds being asked for.
+   *
+   * The contract is strict so routing can trust it blindly: reorder only — same
+   * relays, nothing added, nothing dropped. A hook that throws or returns
+   * something else is ignored for that call rather than allowed to break a read;
+   * an over-defensive router is better than a feed that fails because a scoring
+   * heuristic did.
+   */
+  readonly orderFallback?: (
+    kinds?: readonly number[],
+  ) => readonly string[] | undefined;
 }
 
 /**
@@ -73,6 +94,34 @@ export class OutboxRouter {
     this.fallback = normalizeRelayUrls(options.fallbackRelays);
   }
 
+  /**
+   * The fallback set, ordered for the kinds in play.
+   *
+   * Every use of the fallback goes through here so the ordering hook cannot be
+   * forgotten at one site — the caps make order load-bearing (see the option's
+   * doc). The hook's answer is trusted only when it is a permutation of the
+   * configured set: same length, same members. Anything else — a throw, an added
+   * relay, a dropped one — falls back to the configured order, because a scoring
+   * heuristic must never decide *whether* a relay is consulted, only *when*.
+   */
+  private fallbackFor(kinds?: readonly number[]): readonly string[] {
+    const hook = this.options.orderFallback;
+    if (hook === undefined) return this.fallback;
+    try {
+      const ordered = hook(kinds);
+      if (ordered === undefined) return this.fallback;
+      const normalized = normalizeRelayUrls(ordered);
+      if (normalized.length !== this.fallback.length) return this.fallback;
+      const members = new Set(this.fallback);
+      for (const url of normalized) {
+        if (!members.has(url)) return this.fallback;
+      }
+      return normalized;
+    } catch {
+      return this.fallback;
+    }
+  }
+
   /** The configured fallback relay set, normalised. */
   get fallbackRelays(): readonly string[] {
     return this.fallback;
@@ -97,13 +146,20 @@ export class OutboxRouter {
    * Where to *read* an author's events: their advertised write relays, capped,
    * falling back to the configured set when they advertise nothing.
    */
-  async readRelaysFor(pubkey: Hex32): Promise<readonly string[]> {
+  async readRelaysFor(
+    pubkey: Hex32,
+    kinds?: readonly number[],
+  ): Promise<readonly string[]> {
     const list = await this.relayListFor(pubkey);
-    if (list === undefined) return this.fallback.slice(0, this.maxPerAuthor);
+    if (list === undefined) {
+      return this.fallbackFor(kinds).slice(0, this.maxPerAuthor);
+    }
     const writes = list
       .filter((usage) => usage.write)
       .map((usage) => usage.url);
-    if (writes.length === 0) return this.fallback.slice(0, this.maxPerAuthor);
+    if (writes.length === 0) {
+      return this.fallbackFor(kinds).slice(0, this.maxPerAuthor);
+    }
     return writes.slice(0, this.maxPerAuthor);
   }
 
@@ -113,9 +169,11 @@ export class OutboxRouter {
    */
   async inboxRelaysFor(pubkey: Hex32): Promise<readonly string[]> {
     const list = await this.relayListFor(pubkey);
-    if (list === undefined) return this.fallback.slice(0, this.maxPerAuthor);
+    if (list === undefined)
+      return this.fallbackFor().slice(0, this.maxPerAuthor);
     const reads = list.filter((usage) => usage.read).map((usage) => usage.url);
-    if (reads.length === 0) return this.fallback.slice(0, this.maxPerAuthor);
+    if (reads.length === 0)
+      return this.fallbackFor().slice(0, this.maxPerAuthor);
     return reads.slice(0, this.maxPerAuthor);
   }
 
@@ -127,10 +185,11 @@ export class OutboxRouter {
   /** Per-author read relays for a batch of pubkeys, uncapped by query. */
   async relaysForAuthors(
     pubkeys: readonly Hex32[],
+    kinds?: readonly number[],
   ): Promise<ReadonlyMap<Hex32, readonly string[]>> {
     const out = new Map<Hex32, readonly string[]>();
     for (const pubkey of dedupe(pubkeys)) {
-      out.set(pubkey, await this.readRelaysFor(pubkey));
+      out.set(pubkey, await this.readRelaysFor(pubkey, kinds));
     }
     return out;
   }
@@ -152,13 +211,17 @@ export class OutboxRouter {
     template: Filter = {},
   ): Promise<readonly RelayBasedFilter[]> {
     const authors = dedupe(pubkeys);
+    // The template's kinds drive the fallback ordering everywhere below: a
+    // kind-0 route falls back to the relays measured to deliver profiles, a
+    // kind-30023 route to the ones that deliver long-form.
+    const kinds = template.kinds;
     if (authors.length === 0) {
-      return this.fallback
+      return this.fallbackFor(kinds)
         .slice(0, this.maxPerQuery)
         .map((relay) => ({ relay, filter: { ...template } }));
     }
 
-    const perAuthor = await this.relaysForAuthors(authors);
+    const perAuthor = await this.relaysForAuthors(authors, kinds);
     const relayToAuthors = new Map<string, Set<Hex32>>();
     for (const [pubkey, relays] of perAuthor) {
       for (const relay of relays) {
@@ -168,7 +231,7 @@ export class OutboxRouter {
       }
     }
 
-    const selected = this.greedyCover(relayToAuthors, authors);
+    const selected = this.greedyCover(relayToAuthors, authors, kinds);
 
     const filters: RelayBasedFilter[] = [];
     for (const relay of selected) {
@@ -191,6 +254,7 @@ export class OutboxRouter {
   private greedyCover(
     relayToAuthors: ReadonlyMap<string, Set<Hex32>>,
     authors: readonly Hex32[],
+    kinds?: readonly number[],
   ): readonly string[] {
     const uncovered = new Set(authors);
     const selected: string[] = [];
@@ -215,7 +279,7 @@ export class OutboxRouter {
     }
 
     if (uncovered.size > 0) {
-      for (const relay of this.fallback) {
+      for (const relay of this.fallbackFor(kinds)) {
         if (selected.length >= this.maxPerQuery) break;
         if (selected.includes(relay)) continue;
         selected.push(relay);

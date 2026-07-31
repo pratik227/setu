@@ -235,13 +235,6 @@ export type {
 } from "./relay/relayPool";
 export { WebSocketRelayPool } from "./relay/relayPool";
 export type {
-  SearchFilterOptions,
-  SearchReach,
-  SearchRelay,
-  SearchRouting,
-  SearchRoutingInput,
-} from "./relay/searchRouting";
-export type {
   ContentClass,
   RelayScore,
   RelayScorecard,
@@ -251,14 +244,21 @@ export {
   contentClassOf,
   orderByDelivery,
   SCORED_KINDS,
-  scoreRows,
   scorecardQueries,
+  scoreRows,
 } from "./relay/relayScorecard";
 export type {
   RelayScorecardSource,
   RelayScorecardSourceOptions,
 } from "./relay/relayScorecardSource";
 export { createRelayScorecardSource } from "./relay/relayScorecardSource";
+export type {
+  SearchFilterOptions,
+  SearchReach,
+  SearchRelay,
+  SearchRouting,
+  SearchRoutingInput,
+} from "./relay/searchRouting";
 export {
   MIN_SEARCH_QUERY_LENGTH,
   planRelaySearch,

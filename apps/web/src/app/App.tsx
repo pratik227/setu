@@ -9,20 +9,25 @@ import {
   EmptyState,
   SetuLogo,
   ShellBody,
+  Spinner,
   Tooltip,
   TopChrome,
   useTheme,
 } from "@setu/ui";
 import { ChevronLeft, ChevronRight, Moon, Sun } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { DEFAULT_RELAYS } from "../engine/EngineProvider";
-import { ArticlesScreen } from "../features/articles/ArticlesScreen";
-import { ReadsScreen } from "../features/articles/ReadsScreen";
-import { ChatScreen } from "../features/chat/ChatScreen";
 import { useDirectMessages } from "../features/chat/DirectMessagesProvider";
 import { ComposeDialog } from "../features/compose/ComposeDialog";
 import { DiscoverPanel } from "../features/discover/DiscoverPanel";
-import { ExploreScreen } from "../features/explore/ExploreScreen";
 import { FeedPicker } from "../features/feed/FeedPicker";
 import {
   asHomeFeedId,
@@ -36,15 +41,9 @@ import { useSession } from "../features/identity/SessionProvider";
 import { useFollowAction } from "../features/identity/useFollowAction";
 import { useFollows } from "../features/identity/useFollows";
 import { useMuteIngest } from "../features/moderation/useMuteIngest";
-import { BookmarksScreen } from "../features/notes/BookmarksScreen";
-import { MentionsScreen } from "../features/notifications/MentionsScreen";
-import { NotificationsScreen } from "../features/notifications/NotificationsScreen";
 import { useUnreadCount } from "../features/notifications/readState";
-import { ProfileScreen } from "../features/profile/ProfileScreen";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { useSearchHotkey } from "../features/search/useSearchHotkey";
-import { AboutScreen } from "../features/settings/AboutScreen";
-import { SettingsScreen } from "../features/settings/SettingsScreen";
 import { type Route, routeTitle } from "../features/shell/routes";
 import { SetuSidebar } from "../features/shell/SetuSidebar";
 import {
@@ -52,8 +51,81 @@ import {
   useDeviceSettings,
 } from "../features/sync/localSettings";
 import { ThreadView } from "../features/thread/ThreadView";
-import { WalletScreen } from "../features/wallet/WalletScreen";
 import { useNavigation } from "./useNavigation";
+
+/*
+ * Every routed screen except Home is loaded on demand.
+ *
+ * Before this the app shipped as one chunk: a reader opening Home downloaded the
+ * markdown pipeline, the wallet, every settings form and the chat surface before
+ * the feed could paint. Splitting at the route boundary is the one place lazy
+ * loading is free of judgement calls — a route is by definition not on screen
+ * until navigated to, and the store-first architecture means a just-loaded screen
+ * renders from local data immediately rather than adding a network wait on top.
+ *
+ * Home's own dependencies (LiveFeed, NoteCard, the thread panel) stay static:
+ * they are on screen first and shared by most other routes anyway, so splitting
+ * them would add a loading state to the default view for no byte savings.
+ *
+ * `React.lazy` wants a default export and every screen uses named exports —
+ * hence the `.then` shims. Renaming the exports would touch every test for a
+ * bundler concern.
+ */
+const ArticlesScreen = lazy(() =>
+  import("../features/articles/ArticlesScreen").then((m) => ({
+    default: m.ArticlesScreen,
+  })),
+);
+const ReadsScreen = lazy(() =>
+  import("../features/articles/ReadsScreen").then((m) => ({
+    default: m.ReadsScreen,
+  })),
+);
+const ChatScreen = lazy(() =>
+  import("../features/chat/ChatScreen").then((m) => ({
+    default: m.ChatScreen,
+  })),
+);
+const ExploreScreen = lazy(() =>
+  import("../features/explore/ExploreScreen").then((m) => ({
+    default: m.ExploreScreen,
+  })),
+);
+const BookmarksScreen = lazy(() =>
+  import("../features/notes/BookmarksScreen").then((m) => ({
+    default: m.BookmarksScreen,
+  })),
+);
+const MentionsScreen = lazy(() =>
+  import("../features/notifications/MentionsScreen").then((m) => ({
+    default: m.MentionsScreen,
+  })),
+);
+const NotificationsScreen = lazy(() =>
+  import("../features/notifications/NotificationsScreen").then((m) => ({
+    default: m.NotificationsScreen,
+  })),
+);
+const ProfileScreen = lazy(() =>
+  import("../features/profile/ProfileScreen").then((m) => ({
+    default: m.ProfileScreen,
+  })),
+);
+const AboutScreen = lazy(() =>
+  import("../features/settings/AboutScreen").then((m) => ({
+    default: m.AboutScreen,
+  })),
+);
+const SettingsScreen = lazy(() =>
+  import("../features/settings/SettingsScreen").then((m) => ({
+    default: m.SettingsScreen,
+  })),
+);
+const WalletScreen = lazy(() =>
+  import("../features/wallet/WalletScreen").then((m) => ({
+    default: m.WalletScreen,
+  })),
+);
 
 function ThemeToggle() {
   const { isDark, setMode } = useTheme();
@@ -341,7 +413,17 @@ export function App() {
           {!session ? (
             <LoginScreen />
           ) : (
-            <>
+            /* The fallback is a quiet centred spinner rather than a skeleton of
+               any particular screen: eleven routes share this boundary, and the
+               chunk is on disk after the first visit, so the fallback shows for
+               one network round-trip ever per route. */
+            <Suspense
+              fallback={
+                <div className="flex flex-1 items-center justify-center py-16">
+                  <Spinner size={20} aria-label="Loading this screen" />
+                </div>
+              }
+            >
               {/* `setu-feed-column` centres the title over a 46rem measure,
                   which is right above a timeline and wrong above a full-width
                   surface — on Messages it floated the word into the middle of
@@ -479,7 +561,7 @@ export function App() {
                   description="The shell, identity and publishing are in place; this surface is next."
                 />
               )}
-            </>
+            </Suspense>
           )}
         </ContentSurface>
 

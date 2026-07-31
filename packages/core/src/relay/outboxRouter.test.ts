@@ -235,3 +235,100 @@ describe("OutboxRouter", () => {
     expect(await router.readRelaysFor(PUBKEYS.alice)).toEqual(FALLBACK);
   });
 });
+
+describe("orderFallback", () => {
+  const THREE = [
+    "wss://fallback.one",
+    "wss://fallback.two",
+    "wss://fallback.three",
+  ];
+
+  async function routerWith(
+    orderFallback: (kinds?: readonly number[]) => readonly string[] | undefined,
+  ) {
+    const store = new MemoryEventStore({ scheduler: microtaskScheduler });
+    return new OutboxRouter({
+      store,
+      fallbackRelays: THREE,
+      maxRelaysPerAuthor: 2,
+      orderFallback,
+    });
+  }
+
+  it("decides which relays the capped fallback reaches", async () => {
+    // The case the hook exists for: the specialist sits LAST in the configured
+    // list, and slice(0, 2) would never consult it. Ordering fixes which relays
+    // are asked at all, not just their sequence.
+    const router = await routerWith(() => [THREE[2]!, THREE[0]!, THREE[1]!]);
+    const relays = await router.readRelaysFor(PUBKEYS.alice, [0]);
+    expect(relays).toEqual([THREE[2], THREE[0]]);
+  });
+
+  it("passes the routed kinds to the hook", async () => {
+    let seen: readonly number[] | undefined;
+    const router = await routerWith((kinds) => {
+      seen = kinds;
+      return undefined;
+    });
+    await router.route([PUBKEYS.alice], { kinds: [0, 10002] });
+    expect(seen).toEqual([0, 10002]);
+  });
+
+  it("ignores a hook that drops or invents a relay", async () => {
+    // The hook may reorder, never re-decide membership: a scoring heuristic must
+    // not be able to disconnect a relay the user configured.
+    for (const bad of [
+      () => [THREE[0]!],
+      () => [...THREE, "wss://invented.example"],
+      () => [THREE[0]!, THREE[1]!, "wss://swapped.example"],
+    ]) {
+      const router = await routerWith(bad);
+      const relays = await router.readRelaysFor(PUBKEYS.alice, [0]);
+      expect(relays).toEqual([THREE[0], THREE[1]]);
+    }
+  });
+
+  it("ignores a throwing hook rather than failing the read", async () => {
+    const router = await routerWith(() => {
+      throw new Error("scorecard exploded");
+    });
+    await expect(router.readRelaysFor(PUBKEYS.alice, [0])).resolves.toEqual([
+      THREE[0],
+      THREE[1],
+    ]);
+  });
+
+  it("accepts a permutation whatever its URL spelling", async () => {
+    const router = await routerWith(() => [
+      "wss://Fallback.Three/",
+      "wss://fallback.one",
+      "wss://fallback.two",
+    ]);
+    const relays = await router.readRelaysFor(PUBKEYS.alice, [0]);
+    expect(relays).toEqual([THREE[2], THREE[0]]);
+  });
+
+  it("never consults the hook for an author with a relay list", async () => {
+    // Ordering applies to the fallback only. An author who published where they
+    // write has answered the question themselves.
+    const store = new MemoryEventStore({ scheduler: microtaskScheduler });
+    await store.putAll([
+      relayList({
+        pubkey: PUBKEYS.alice,
+        tags: [["r", "wss://alice.example", "write"]],
+      }),
+    ]);
+    let called = 0;
+    const router = new OutboxRouter({
+      store,
+      fallbackRelays: THREE,
+      orderFallback: () => {
+        called += 1;
+        return undefined;
+      },
+    });
+    const relays = await router.readRelaysFor(PUBKEYS.alice, [0]);
+    expect(relays).toEqual(["wss://alice.example"]);
+    expect(called).toBe(0);
+  });
+});

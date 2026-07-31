@@ -14,6 +14,11 @@ import { useCallback, useState } from "react";
 import { DEFAULT_RELAYS, useEngine } from "../../engine/EngineProvider";
 import { usePublish } from "../compose/usePublish";
 import {
+  RelayDeliveryCaption,
+  RelayDeliveryLine,
+  useRelayDelivery,
+} from "./RelayDelivery";
+import {
   editDmRelayList,
   editRelayList,
   type RelayEntry,
@@ -22,6 +27,9 @@ import {
 import { refusalMessage, SaveRow, useOwnReplaceable } from "./settingsShared";
 
 export function RelaySection() {
+  // One provenance scan for the whole panel; each row reads its own line out of
+  // it. What a relay ADVERTISES is already on the row — this is what it DID.
+  const delivery = useRelayDelivery();
   const engine = useEngine();
   const { publish, state } = usePublish();
   const { event, absenceConfirmed } = useOwnReplaceable(Kind.RelayList);
@@ -180,10 +188,13 @@ export function RelaySection() {
                           : "This relay needs NIP-42 login. Setu answers the challenge for relays it is connected to when your session can sign; a read-only session will get nothing from it."}
                       </p>
                     ) : null}
+                    <RelayDeliveryLine url={entry.url} scorecard={delivery} />
                   </li>
                 );
               })}
             </ul>
+
+            <RelayDeliveryCaption />
 
             <div className="flex gap-2">
               <Input

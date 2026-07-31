@@ -29,6 +29,7 @@ import { DefaultProfileBatcher } from "./profiles/profileBatcher";
 import { OutboxRouter, type OutboxRouterOptions } from "./relay/outboxRouter";
 import { RelayInfoCache } from "./relay/relayInfoCache";
 import { WebSocketRelayPool } from "./relay/relayPool";
+import { createRelayScorecardSource } from "./relay/relayScorecardSource";
 import type { CreateSocket } from "./relay/socket";
 import { DefaultSubscriptionManager } from "./relay/subscriptionManager";
 import { MemoryEventStore } from "./store/memoryStore";
@@ -216,10 +217,26 @@ export function createEngine(options: EngineOptions): Engine {
     }
   });
 
+  /*
+   * Fallback routing is ordered by measured delivery, not list position.
+   *
+   * The router's fallbacks are capped, so order decides which relays are consulted
+   * at all for an author with no relay list — and "the order the user typed their
+   * relays in" is not a decision. The scorecard aggregates store provenance (which
+   * relay actually delivered which kinds) so a kind-0 fallback leads with the
+   * relays that have delivered profiles, a kind-30023 fallback with the ones that
+   * have delivered long-form. Bootstrap-safe: before the first scan completes the
+   * hook returns the input unchanged, which is exactly the old behaviour.
+   */
+  const scorecard = createRelayScorecardSource({
+    store,
+    onError: (e) => onError("relayScorecard", e),
+  });
   const outbox = new OutboxRouter({
     ...options.outbox,
     store,
     fallbackRelays: options.relays,
+    orderFallback: (kinds) => scorecard.order(options.relays, kinds),
   });
 
   const subscriptions = new DefaultSubscriptionManager({
