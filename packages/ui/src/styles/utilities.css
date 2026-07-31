@@ -1,0 +1,124 @@
+/*
+ * Perf-as-design utilities.
+ *
+ * `content-visibility: auto` lets the browser skip layout and paint for
+ * off-screen rows entirely. `contain-intrinsic-size` supplies the size estimate
+ * that keeps the scrollbar honest while rows are skipped — without it the
+ * scroll thumb jitters as real heights resolve. Sizes are per-row-type because
+ * one global guess is wrong for both a 60px sidebar row and a 400px note with
+ * an image.
+ *
+ * Un-pause on hover/focus so a skipped row cannot swallow interaction.
+ */
+
+.cv-auto-note {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
+.cv-auto-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
+}
+
+.cv-auto-sidebar-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2rem;
+}
+
+.cv-auto-note:hover,
+.cv-auto-note:focus-within,
+.cv-auto-row:hover,
+.cv-auto-row:focus-within,
+.cv-auto-sidebar-row:hover,
+.cv-auto-sidebar-row:focus-within {
+  content-visibility: visible;
+}
+
+/*
+ * The reading column cap. A timeline stretched across an ultrawide monitor is
+ * unreadable; the shell is wide, the prose is not.
+ */
+.setu-reading-column {
+  width: 100%;
+  max-width: 42rem;
+  margin-inline: auto;
+}
+
+/*
+ * Feeds get a slightly wider cap than prose: a note row carries an avatar
+ * gutter and an action row alongside the text, so the text column inside it is
+ * already narrower than the row. 36rem of prose inside a 46rem row lands close
+ * to the same measure a 42rem article does.
+ */
+.setu-feed-column {
+  width: 100%;
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
+/*
+ * Chrome surfaces: translucent, blurred, with a hairline bottom rule.
+ *
+ * The hairline is a real `border-bottom`, not an absolutely positioned
+ * `::after`. It used to be the latter, which required `position: relative` on
+ * this class — and because these rules are UNLAYERED they beat Tailwind's
+ * layered `utilities`, so `position: relative` silently overrode every `sticky`
+ * on the same element. Every header using `setu-chrome-surface sticky top-0`
+ * scrolled away while looking correct in the markup. A border cannot do that.
+ */
+.setu-chrome-surface {
+  background-color: hsl(var(--background) / 0.8);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid hsl(var(--border) / 0.35);
+}
+
+.dark .setu-chrome-surface {
+  background-color: hsl(var(--background) / 0.7);
+  backdrop-filter: blur(20px);
+}
+
+/* Focus ring used across interactive primitives. */
+.setu-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px hsl(var(--ring));
+}
+
+/* Truncate to a fixed number of lines (note previews, bios). */
+.setu-clamp-2,
+.setu-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.setu-clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
+.setu-clamp-3 {
+  -webkit-line-clamp: 3;
+}
+
+/* Native drag region for the desktop shell's title bar area. */
+.setu-drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.setu-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/*
+ * Machine facts: keys, ids, kinds, relay hosts, counts, amounts, timestamps.
+ *
+ * `tabular-nums` matters more than it looks — a count that changes width as it
+ * ticks makes a whole action row shift under the pointer.
+ */
+.setu-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}

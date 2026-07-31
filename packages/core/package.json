@@ -1,0 +1,24 @@
+{
+  "name": "@setu/core",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Headless Setu client engine: event store, relay pool, subscriptions, feeds",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@setu/protocol": "workspace:*",
+    "dexie": "^4.2.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.2",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

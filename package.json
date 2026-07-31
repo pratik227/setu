@@ -1,0 +1,30 @@
+{
+  "name": "setu",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Setu \u2014 a Nostr social client for web and desktop",
+  "packageManager": "pnpm@11.4.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @setu/web dev",
+    "build": "pnpm --filter @setu/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "biome check .",
+    "fmt": "biome check --write .",
+    "check:px-text": "node scripts/check-px-text.mjs",
+    "check:file-sizes": "node scripts/check-file-sizes.mjs",
+    "check:layers": "node scripts/check-layer-imports.mjs",
+    "guards": "pnpm check:px-text && pnpm check:file-sizes && pnpm check:layers",
+    "verify": "pnpm lint && pnpm guards && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

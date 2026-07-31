@@ -1,0 +1,70 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    // The two excluded stylesheets carry Tailwind v4 at-rules (@theme,
+    // @custom-variant, @source) that Biome's CSS parser rejects. Every other
+    // stylesheet is still checked.
+    //
+    // Dot-prefixed scripts are one-off probes written to answer a single
+    // question and deleted afterwards. Holding a throwaway to the house style
+    // gates the build on a file nobody will read again; a probe that has earned
+    // a permanent place gets a real name, and with it the checks.
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/test-results",
+      "!**/*.gen.ts",
+      "!**/.*.mjs",
+      "!**/styles/index.css",
+      "!apps/web/src/styles.css"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        // Load-bearing on `ACCENTS[0]!`-style lookups under
+        // noUncheckedIndexedAccess, where the array is a module constant.
+        "noNonNullAssertion": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      },
+      "a11y": {
+        // Note media is arbitrary user-published video from a relay; there is no
+        // caption track to attach, so the rule can only ever be suppressed.
+        "useMediaCaption": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": {
+          "level": "error",
+          "options": {
+            // Missing dependencies stay an error — those are real staleness bugs.
+            // Extra ones are allowed: we deliberately pass values that scope a
+            // cache rather than feed the body (`[engine]` on an engine-scoped
+            // memo, `definitionKey` standing in for an inline object). The rule
+            // models dependencies as "values read in the body" and cannot tell
+            // that apart from an oversight.
+            "reportUnnecessaryDependencies": false
+          }
+        }
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "always"
+    }
+  }
+}

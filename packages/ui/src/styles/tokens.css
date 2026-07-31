@@ -1,0 +1,252 @@
+/*
+ * Setu design tokens.
+ *
+ * Every color is stored as an HSL *component triplet* — `"40 20% 98%"`, not
+ * `hsl(...)` — and consumed as `hsl(var(--token))`. That is what makes Tailwind's
+ * alpha modifiers (`bg-background/40`) work on themed colors, and it is what lets
+ * the runtime theme engine swap an entire palette by writing 30 strings.
+ *
+ * The palette is chosen for a reading surface people sit inside for long
+ * stretches: a calm warm-neutral with a single teal accent, so content carries the
+ * color and chrome stays quiet. The optional painted-gradient themes live at the
+ * bottom of this file.
+ */
+
+:root {
+  --radius: 0.625rem;
+
+  /*
+   * Light: cool paper, graphite ink, and no brand hue at all.
+   *
+   * The palette is deliberately achromatic. Nostr already fixes four meanings to
+   * four colours — zaps are gold, reposts green, likes rose, verification azure —
+   * and a fifth decorative accent competes with every one of them. So in Setu
+   * **saturated colour always means protocol data**, never decoration, and
+   * interactive state is carried by ink contrast, weight and underline instead.
+   * A client whose whole argument is that it does not editorialise should not
+   * editorialise with hue either.
+   */
+  --background: 220 20% 99%;
+  --foreground: 220 16% 9%;
+  --card: 220 20% 99%;
+  --card-foreground: 220 16% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 16% 9%;
+  /* Primary is ink, not a colour: a filled control is the darkest thing present. */
+  --primary: 220 16% 11%;
+  --primary-foreground: 220 20% 99%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 220 16% 9%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 8% 42%;
+  --accent: 220 14% 94.5%;
+  --accent-foreground: 220 16% 9%;
+  --destructive: 356 68% 45%;
+  --destructive-foreground: 220 20% 99%;
+  --border: 220 13% 90%;
+  --input: 220 13% 88%;
+  --ring: 220 16% 20%;
+
+  /* Chrome is a hair cooler and darker than the reading surface. */
+  --sidebar-background: 220 17% 97%;
+  --sidebar-foreground: 220 16% 9%;
+  --sidebar-primary: 220 16% 11%;
+  --sidebar-primary-foreground: 220 20% 99%;
+  --sidebar-active: var(--sidebar-primary);
+  --sidebar-active-foreground: var(--sidebar-primary-foreground);
+  --sidebar-accent: 220 14% 93%;
+  --sidebar-accent-foreground: 220 16% 9%;
+  --sidebar-border: 220 13% 89%;
+  --sidebar-ring: 220 16% 20%;
+
+  /*
+   * The only saturated colours in the interface, and each one carries a fixed
+   * protocol meaning rather than a brand association.
+   */
+  --zap: 36 80% 46%;
+  --repost: 147 46% 36%;
+  --like: 345 70% 47%;
+  --verified: 212 72% 46%;
+
+  /*
+   * Optional painted-canvas themes ("Dawn"/"Dusk"), off by default. "Setu" is
+   * Sanskrit for bridge, so the ramp bridges a cool shore to a warm one: pale
+   * sage-teal into warm sand in light, deep teal into plum-black in dark.
+   */
+  --setu-gradient-light-top: #d8e6df;
+  --setu-gradient-light-bottom: #e9dcd2;
+  --setu-gradient-dark-top: #12302b;
+  --setu-gradient-dark-bottom: #1b1420;
+  /* Warmer neutral for the inset content card in the dark brand theme. */
+  --setu-content-dark: 260 12% 9.5%;
+}
+
+.dark {
+  /* Dark: cool slate, near-white ink, same achromatic rule. */
+  --background: 222 18% 7%;
+  --foreground: 220 14% 92%;
+  --card: 222 18% 7%;
+  --card-foreground: 220 14% 92%;
+  --popover: 222 16% 11%;
+  --popover-foreground: 220 14% 92%;
+  --primary: 220 14% 93%;
+  --primary-foreground: 222 18% 8%;
+  --secondary: 222 14% 13%;
+  --secondary-foreground: 220 14% 92%;
+  --muted: 222 14% 13%;
+  --muted-foreground: 220 9% 60%;
+  --accent: 222 13% 15%;
+  --accent-foreground: 220 14% 92%;
+  --destructive: 356 72% 60%;
+  --destructive-foreground: 222 18% 8%;
+  --border: 222 12% 18%;
+  --input: 222 12% 22%;
+  --ring: 220 14% 70%;
+
+  --sidebar-background: 222 20% 5.5%;
+  --sidebar-foreground: 220 14% 92%;
+  --sidebar-primary: 220 14% 93%;
+  --sidebar-primary-foreground: 222 18% 8%;
+  --sidebar-active: var(--sidebar-primary);
+  --sidebar-active-foreground: var(--sidebar-primary-foreground);
+  --sidebar-accent: 222 13% 12%;
+  --sidebar-accent-foreground: 220 14% 92%;
+  --sidebar-border: 222 12% 16%;
+  --sidebar-ring: 220 14% 70%;
+
+  --zap: 38 86% 60%;
+  --repost: 147 50% 52%;
+  --like: 345 76% 63%;
+  --verified: 212 80% 62%;
+}
+
+/*
+ * Flat mode (the default).
+ *
+ * Chrome is a solid, slightly recessed fill separated from the reading surface
+ * by a hairline. No gradient, no floating card — for a feed, the quieter frame
+ * keeps attention on the notes.
+ */
+[data-setu-chrome] {
+  background-color: hsl(var(--sidebar-background));
+}
+
+[data-setu-sidebar-edge] {
+  border-right: 1px solid hsl(var(--sidebar-border));
+}
+
+/*
+ * Gradient mode (opt-in, `data-setu-gradient` on <html>).
+ *
+ * These rules are intentionally UNLAYERED: Tailwind's `bg-sidebar` lives in the
+ * utilities layer, and unlayered declarations beat layered ones, so this wins
+ * without `!important`. The comment is worth keeping because the reason is
+ * invisible from the rule itself.
+ *
+ * The gradient is painted ONCE across the whole app surface and every child
+ * chrome canvas goes transparent over it, so sidebar, top chrome and the inset
+ * margin all reveal one continuous ramp. Interaction states go neutral ink
+ * rather than colored — over a gradient, a saturated primary reads as noise.
+ */
+:root[data-setu-gradient] {
+  --setu-gradient-top: var(--setu-gradient-light-top);
+  --setu-gradient-bottom: var(--setu-gradient-light-bottom);
+  --setu-muted-foreground: rgb(0 0 0 / 40%);
+  --setu-chrome-foreground: rgb(0 0 0 / 50%);
+  --setu-search-surface: rgb(0 0 0 / 4%);
+  --setu-hover-surface: rgb(0 0 0 / 4%);
+  --setu-active-surface: rgb(0 0 0 / 7%);
+  --setu-active-fill: 0 0% 0%;
+  --setu-active-foreground: var(--foreground);
+}
+
+:root[data-setu-gradient].dark {
+  --setu-gradient-top: var(--setu-gradient-dark-top);
+  --setu-gradient-bottom: var(--setu-gradient-dark-bottom);
+  --setu-muted-foreground: rgb(255 255 255 / 40%);
+  --setu-chrome-foreground: rgb(255 255 255 / 50%);
+  --setu-search-surface: rgb(255 255 255 / 4%);
+  --setu-hover-surface: rgb(255 255 255 / 4%);
+  --setu-active-fill: 0 0% 100%;
+  --setu-active-surface: color-mix(
+    in srgb,
+    hsl(var(--setu-active-fill)) 16%,
+    transparent
+  );
+  --setu-active-foreground: 0 0% 100%;
+}
+
+/* Chrome canvases dissolve into the single painted gradient. */
+:root[data-setu-gradient] [data-setu-chrome] {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* The gradient itself separates chrome from content; borders would double it. */
+:root[data-setu-gradient] [data-setu-sidebar-edge] {
+  border-right-color: transparent;
+}
+
+:root[data-setu-gradient] [data-setu-content-surface] {
+  border-inline-color: transparent;
+}
+
+/* Only in gradient mode does content read as a sheet tucked under the chrome. */
+:root[data-setu-gradient] [data-setu-content-surface] {
+  border-top-left-radius: 0.75rem;
+}
+
+/*
+ * Keep BOTH gradient layers mounted and toggle only opacity. WKWebView retains
+ * the old raster when `background-image` is swapped on a translucent surface,
+ * so a theme change without a reload would otherwise leave a stale ramp.
+ */
+:root[data-setu-gradient] .setu-gradient-layer-light {
+  background-image: linear-gradient(
+    to bottom,
+    var(--setu-gradient-light-top),
+    var(--setu-gradient-light-bottom)
+  );
+  background-size: 100vw 100vh;
+  background-repeat: no-repeat;
+}
+
+:root[data-setu-gradient] .setu-gradient-layer-dark {
+  background-image: linear-gradient(
+    to bottom,
+    var(--setu-gradient-dark-top),
+    var(--setu-gradient-dark-bottom)
+  );
+  background-size: 100vw 100vh;
+  background-repeat: no-repeat;
+}
+
+:root[data-setu-gradient]:not(.dark) .setu-gradient-layer-light,
+:root[data-setu-gradient].dark .setu-gradient-layer-dark {
+  opacity: 1;
+}
+
+/*
+ * The content card floating on the gradient. Both shadow layers run on -x so
+ * they wrap the card's rounded left corners: the hairline draws the boundary,
+ * the soft layer carries the lift. A left border alone tapers out at corners.
+ */
+:root[data-setu-gradient]:not(.dark) [data-setu-content-surface] {
+  /* The hairline comes from the token so the two cannot drift; the soft lift is
+     specific to this surface and stays local. */
+  box-shadow:
+    var(--shadow-content-edge),
+    0 0 4px 0 rgb(0 0 0 / 7%);
+}
+
+/* Let the card's shadow feather out into the surrounding gradient. */
+:root[data-setu-gradient]:not(.dark) [data-setu-shadow-viewport] {
+  overflow: visible;
+}
+
+/* Dark brand theme warms the inset canvas; descendants using bg-background
+   must follow, so override the token locally rather than only the fill. */
+:root[data-setu-gradient].dark [data-setu-content-surface] {
+  --background: var(--setu-content-dark);
+  background-color: hsl(var(--background));
+}

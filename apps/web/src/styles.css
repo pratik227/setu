@@ -1,0 +1,7 @@
+@import "@fontsource-variable/inter";
+/* Machine facts. Two weights, latin only — mono appears in small doses. */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@setu/ui/styles.css";
+@source "../../../packages/ui/src";
+@source "./";

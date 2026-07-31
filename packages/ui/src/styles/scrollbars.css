@@ -1,0 +1,60 @@
+/*
+ * Scrollbars: present but quiet. The thumb is transparent at rest and only
+ * takes color while the pointer is over its container, so a feed at rest has no
+ * chrome running down its edge.
+ *
+ * `scrollbar-gutter: stable` on scroll containers reserves the track width so
+ * content does not shift horizontally the moment a list becomes scrollable —
+ * that jump is very visible in a timeline that grows as events arrive.
+ */
+
+.setu-scroll {
+  scrollbar-gutter: stable;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.setu-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.setu-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.setu-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  transition: background-color var(--motion-duration-fast)
+    var(--motion-ease-standard);
+}
+
+.setu-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--foreground) / 0.18);
+}
+
+.setu-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--foreground) / 0.28);
+}
+
+/* Over the brand gradient, chrome scrollbars use the neutral ink tokens. */
+:root[data-setu-gradient]
+  [data-setu-chrome]
+  .setu-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: var(--setu-hover-surface);
+}
+
+/* Firefox. */
+@supports (scrollbar-width: thin) {
+  .setu-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .setu-scroll:hover {
+    scrollbar-color: hsl(var(--foreground) / 0.18) transparent;
+  }
+}

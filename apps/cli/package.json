@@ -1,0 +1,27 @@
+{
+  "name": "@setu/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Headless consumer of @setu/core. Exists to keep the core layer honest: if a feature cannot be exercised without React, it is in the wrong layer.",
+  "bin": {
+    "setu": "./src/main.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@setu/core": "workspace:*",
+    "@setu/protocol": "workspace:*",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

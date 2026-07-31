@@ -1,0 +1,13 @@
+import { chromium } from "@playwright/test";
+const b = await chromium.launch();
+const page = await b.newPage({ viewport: { width: 1500, height: 950 } });
+await page.addInitScript(() => localStorage.setItem("setu-session", JSON.stringify({ kind: "readonly", pubkey: "84dee6e676e5bb67b4ad4e042cf70cbd8681155db535942fcc6a0533858a7240" })));
+await page.goto("http://localhost:4173/", { waitUntil: "domcontentloaded" });
+await page.waitForSelector("article", { timeout: 30000 });
+await page.waitForTimeout(10000);
+const start = await page.evaluate(() => globalThis.__noteRenders ?? 0);
+const rows = await page.locator("article").count();
+await page.waitForTimeout(20000);
+const end = await page.evaluate(() => globalThis.__noteRenders ?? 0);
+console.log(`rows=${rows}  renders during 20s of live updates: ${end - start}`);
+await b.close();

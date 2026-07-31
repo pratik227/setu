@@ -1,0 +1,69 @@
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    min-height: 100%;
+    width: 100%;
+  }
+
+  /*
+   * Setu is a fixed-height shell — the document itself must never scroll or
+   * rubber-band. `overscroll-behavior: none` stops scroll chaining from inner
+   * containers reaching the viewport (a trackpad horizontal pan escapes through
+   * here otherwise); `overflow: hidden` removes document-level scrollability.
+   */
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /*
+   * Tailwind v4's preflight dropped `cursor: pointer` on buttons. Restore it for
+   * clearly actionable elements; disabled ones keep the default. Utility classes
+   * still win because utilities sit in a later layer than base.
+   */
+  button:not(:disabled),
+  a[href],
+  summary,
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="link"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: default;
+  }
+
+  /* Search-result highlighting should not repaint the note's own colors. */
+  mark {
+    background-color: transparent;
+    color: inherit;
+    font-weight: 600;
+  }
+
+  /* Stop HDR avatars and note images from glowing on P3 displays. */
+  img {
+    dynamic-range-limit: standard;
+  }
+}

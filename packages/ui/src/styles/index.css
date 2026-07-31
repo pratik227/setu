@@ -1,0 +1,105 @@
+/*
+ * Setu stylesheet entry. Import order matters: Tailwind first, then tokens (so
+ * the variables exist), then base/motion/utilities layers.
+ */
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css";
+@import "./motion.css";
+@import "./scrollbars.css";
+@import "./utilities.css";
+
+/*
+ * Dark mode is class-driven, not media-driven: the user's explicit choice has to
+ * be able to override the OS preference, and the anti-FOUC boot script needs a
+ * class it can set before React mounts.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * `inline` is load-bearing. Without it Tailwind snapshots each token's value
+ * into `:root`, and `bg-background` would keep resolving to the light value
+ * after `.dark` swaps the underlying variable. With it, utilities compile to
+ * `hsl(var(--background))` directly and follow the theme at runtime.
+ */
+@theme inline {
+  /*
+   * Two faces, two jobs.
+   *
+   * `sans` carries everything a person reads or clicks. `mono` is reserved for
+   * what the protocol produced — keys, ids, kinds, relay hosts, counts,
+   * timestamps, amounts — because a pubkey set in the body face reads as prose
+   * and wraps like prose, which is wrong for a string that has to be compared
+   * character by character.
+   */
+  --font-sans: "Inter Variable", Inter, "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-active-foreground: hsl(var(--sidebar-active-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  /* Nostr-semantic colors — zap gold, repost green, like red, nip05 blue. */
+  --color-zap: hsl(var(--zap));
+  --color-repost: hsl(var(--repost));
+  --color-like: hsl(var(--like));
+  --color-verified: hsl(var(--verified));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /*
+   * Sub-`text-xs` ramp for meta text. Defined in rem so Cmd +/- zoom — which
+   * scales the root font-size — keeps scaling it. Never reintroduce arbitrary
+   * `text-[…px]` or `text-[…rem]` literals: px freezes against zoom, and
+   * arbitrary rem re-fragments the scale. The px-text guard fails the build on
+   * both. Note body is `text-base` (16px); everything else steps down from it.
+   */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-3xs: 0.5rem;
+  --text-3xs--line-height: 0.75rem;
+  --text-badge: 0.625rem;
+  --text-badge--line-height: 1;
+  --text-title: 2.5rem;
+  --text-title--line-height: 1.15;
+  --text-title--letter-spacing: -0.02em;
+  --text-nsec-key: 2.25rem;
+  --text-nsec-key--line-height: 1.3;
+
+  --shadow-content-edge: -1px -1px 0 0 hsl(var(--sidebar-border) / 0.45);
+  --shadow-panel-left:
+    -1px 0 0 0 hsl(var(--border) / 0.8), -16px 0 32px -12px rgb(0 0 0 / 0.18);
+  /* Very soft, very tight — three layers at 2%/4%/4% alpha. */
+  --shadow-popover:
+    0 6px 18px lch(0% 0 0 / 0.02), 0 3px 9px lch(0% 0 0 / 0.04),
+    0 1px 1px lch(0% 0 0 / 0.04);
+}
