@@ -15,9 +15,10 @@ import {
   Skeleton,
 } from "@setu/ui";
 import { ChevronDown, Database } from "lucide-react";
-import { useState } from "react";
+import { useCallback } from "react";
 import { compactCount } from "../notes/relativeTime";
 import type { AuthorView } from "../notes/types";
+import { setDeviceSettings, useDeviceSettings } from "../sync/localSettings";
 import { TopicChips } from "./TopicChips";
 import { useActiveAuthors } from "./useActiveAuthors";
 import { type LocalStats, useLocalStats } from "./useLocalStats";
@@ -158,12 +159,37 @@ const TRENDING_WINDOWS: readonly TrendingWindow[] = [
   { label: "24 hours", seconds: 24 * 60 * 60 },
 ];
 
+/**
+ * A label for a window, listed or not.
+ *
+ * The picker offers four, but the *setting* is a number and syncs between devices, so
+ * a build that lists different windows than the one that wrote the document will
+ * arrive here with a value matching none of them. The window in effect is the one the
+ * setting names, so it is labelled rather than rounded to the nearest option: showing
+ * "12 hours" while filtering on six would make every count on the panel a claim about
+ * a period the panel does not name.
+ */
+export function trendingWindowLabel(seconds: number): string {
+  const listed = TRENDING_WINDOWS.find((option) => option.seconds === seconds);
+  if (listed) return listed.label;
+  if (seconds < 60) {
+    const whole = Math.max(1, Math.round(seconds));
+    return `${whole} ${whole === 1 ? "second" : "seconds"}`;
+  }
+  if (seconds < 3600) {
+    const minutes = Math.round(seconds / 60);
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  const hours = Math.round(seconds / 3600);
+  return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+}
+
 function TrendingWindowPicker({
-  value,
+  seconds,
   onChange,
 }: {
-  value: TrendingWindow;
-  onChange(next: TrendingWindow): void;
+  seconds: number;
+  onChange(next: number): void;
 }) {
   return (
     <DropdownMenu>
@@ -173,7 +199,7 @@ function TrendingWindowPicker({
           size="xs"
           className="gap-1 text-muted-foreground data-[state=open]:bg-accent"
         >
-          {value.label}
+          {trendingWindowLabel(seconds)}
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
@@ -181,8 +207,8 @@ function TrendingWindowPicker({
         {TRENDING_WINDOWS.map((option) => (
           <DropdownMenuItem
             key={option.seconds}
-            onSelect={() => onChange(option)}
-            className={option.seconds === value.seconds ? "font-semibold" : ""}
+            onSelect={() => onChange(option.seconds)}
+            className={option.seconds === seconds ? "font-semibold" : ""}
           >
             Last {option.label}
           </DropdownMenuItem>
@@ -197,12 +223,24 @@ export function DiscoverPanel({
   onOpenHashtag,
 }: DiscoverPanelProps) {
   const stats = useLocalStats();
-  const [trendWindow, setTrendWindow] = useState<TrendingWindow>(
-    TRENDING_WINDOWS[2]!,
+
+  /*
+   * The window is the synced setting, read and written directly.
+   *
+   * Previously pinned to `TRENDING_WINDOWS[2]` in local state, so the preference
+   * Settings shows as synced never reached the panel it configures, and choosing a
+   * window lasted until the next navigation away from Home.
+   */
+  const { trendingWindowSeconds } = useDeviceSettings();
+  const setWindowSeconds = useCallback(
+    (seconds: number) => setDeviceSettings({ trendingWindowSeconds: seconds }),
+    [],
   );
+  const windowLabel = trendingWindowLabel(trendingWindowSeconds);
+
   const { topics, sampleSize } = useTrendingTopics({
     limit: 10,
-    windowSeconds: trendWindow.seconds,
+    windowSeconds: trendingWindowSeconds,
   });
   const { authors: activeAuthors } = useActiveAuthors({ limit: 8 });
   // Only authors whose kind-0 has arrived. A tile is an invitation to click, and
@@ -223,8 +261,8 @@ export function DiscoverPanel({
           title="Talked about"
           action={
             <TrendingWindowPicker
-              value={trendWindow}
-              onChange={setTrendWindow}
+              seconds={trendingWindowSeconds}
+              onChange={setWindowSeconds}
             />
           }
         >
@@ -234,13 +272,13 @@ export function DiscoverPanel({
                 <TopicChips topics={topics} onOpenHashtag={onOpenHashtag} />
                 <p className="mt-2 text-2xs text-muted-foreground/80">
                   Across {sampleSize} {sampleSize === 1 ? "note" : "notes"} from
-                  the last {trendWindow.label} in your local index.
+                  the last {windowLabel} in your local index.
                 </p>
               </>
             ) : (
               <p className="text-xs text-muted-foreground">
-                No hashtags from the last {trendWindow.label} in your index. Try
-                a longer window, or open a feed to fill it.
+                No hashtags from the last {windowLabel} in your index. Try a
+                longer window, or open a feed to fill it.
               </p>
             )}
           </div>

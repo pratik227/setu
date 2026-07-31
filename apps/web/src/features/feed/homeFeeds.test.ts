@@ -1,6 +1,7 @@
 import { Kind } from "@setu/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  asHomeFeedId,
   GLOBAL_WINDOW_SECONDS,
   HOME_FEEDS,
   homeFeedDefinition,
@@ -126,6 +127,37 @@ describe("homeFeedDefinition", () => {
       homeFeedDefinition({
         id: "global-24h",
         followedAuthors: [],
+        relays: RELAYS,
+        now: NOW,
+      }),
+    ).toBeDefined();
+  });
+});
+
+describe("asHomeFeedId", () => {
+  it("keeps every id the picker offers", () => {
+    for (const feed of HOME_FEEDS) {
+      expect(asHomeFeedId(feed.id)).toBe(feed.id);
+    }
+  });
+
+  it.each(["", "trending", "global", "latest ", "LATEST"])(
+    "narrows %o to the default feed",
+    (stored) => {
+      // The persisted preference is a string. It can be hand-edited, and it can
+      // come from a newer build that offered a feed this one does not have —
+      // casting it would build a filter for a feed with no definition, and the
+      // reader would get an empty timeline with no way to tell why.
+      expect(asHomeFeedId(stored)).toBe("latest");
+    },
+  );
+
+  it("resolves to a feed that has a definition", () => {
+    // The property that matters: whatever comes out can actually be fetched.
+    expect(
+      homeFeedDefinition({
+        id: asHomeFeedId("nonsense"),
+        followedAuthors: FOLLOWS,
         relays: RELAYS,
         now: NOW,
       }),

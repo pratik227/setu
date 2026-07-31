@@ -86,6 +86,26 @@ export function homeFeedOption(id: HomeFeedId): HomeFeedOption {
   return HOME_FEEDS.find((feed) => feed.id === id) ?? HOME_FEEDS[0]!;
 }
 
+/**
+ * A stored feed id, narrowed to one this build can actually show.
+ *
+ * The persisted preference is a string, not a `HomeFeedId`, and it has two ways of
+ * carrying something unexpected: a hand-edited `localStorage` row, and a settings
+ * document written by a *newer* build that offered a feed this one does not have.
+ * Neither is corruption, so neither is worth an error — but casting the string and
+ * handing it to `homeFeedDefinition` would build a filter for a feed with no
+ * definition, and the reader would get an empty timeline with no way to tell why.
+ *
+ * Falling back is deliberately non-destructive: this returns a safe id to *render*
+ * and nothing writes it back, so the unknown value survives in the document for the
+ * device that understands it.
+ */
+export function asHomeFeedId(value: string): HomeFeedId {
+  return HOME_FEEDS.some((feed) => feed.id === value)
+    ? (value as HomeFeedId)
+    : HOME_FEEDS[0]!.id;
+}
+
 export interface HomeFeedInput {
   readonly id: HomeFeedId;
   readonly followedAuthors: readonly string[];

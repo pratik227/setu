@@ -23,7 +23,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { insertAt } from "./emoji";
 import { imetaTag, type UploadedMedia } from "./nip96";
 import { usePublish } from "./usePublish";
-import { ACCEPTED_MEDIA, DEFAULT_MEDIA_HOST, useUpload } from "./useUpload";
+import { ACCEPTED_MEDIA, hostLabel, useUpload } from "./useUpload";
 
 /**
  * Notes have no protocol length limit, but relays impose their own and a
@@ -294,8 +294,7 @@ export function Composer({
 
           {upload.state.status === "uploading" ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              Uploading {upload.state.name} to{" "}
-              {new URL(DEFAULT_MEDIA_HOST).hostname}…
+              Uploading {upload.state.name} to {hostLabel(upload.host)}…
             </p>
           ) : null}
           {upload.state.status === "error" ? (

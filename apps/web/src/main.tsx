@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { EngineProvider } from "./engine/EngineProvider";
 import { SessionProvider } from "./features/identity/SessionProvider";
+import { SettingsSyncProvider } from "./features/sync/SettingsSyncProvider";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -32,7 +33,13 @@ createRoot(container).render(
             this direction is the one that works. */}
           <SessionProvider>
             <EngineProvider>
-              <App />
+              {/* Innermost, and above the whole app: the sync engine needs the
+                session, the engine and the theme, and it has to run wherever the
+                app starts rather than only where settings are displayed. See
+                SettingsSyncProvider for why there is exactly one of it. */}
+              <SettingsSyncProvider>
+                <App />
+              </SettingsSyncProvider>
             </EngineProvider>
           </SessionProvider>
         </TooltipProvider>

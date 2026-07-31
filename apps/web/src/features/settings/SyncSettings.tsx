@@ -10,9 +10,10 @@ import {
 } from "@setu/ui";
 import { CloudOff, RefreshCw, ShieldAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { type HomeFeedId, homeFeedOption } from "../feed/homeFeeds";
+import { HOME_FEEDS } from "../feed/homeFeeds";
 import { absoluteTime, relativeTime } from "../notes/relativeTime";
 import { setDeviceSettings, useDeviceSettings } from "../sync/localSettings";
+import { useSettingsSyncContext } from "../sync/SettingsSyncProvider";
 import {
   DEFAULT_MEDIA_HOST,
   SETTING_KEYS,
@@ -23,7 +24,6 @@ import {
   type SettingsSync,
   type SyncReadability,
   useEffectiveSettings,
-  useSettingsSync,
 } from "../sync/useSettingsSync";
 import { SaveRow } from "./settingsShared";
 
@@ -64,8 +64,17 @@ function describeValue(key: SettingKey, settings: SyncedSettings): string {
       return findTheme(settings.themeId).label;
     case "accentId":
       return findAccent(settings.accentId).label;
-    case "homeFeed":
-      return homeFeedOption(settings.homeFeed as HomeFeedId).label;
+    case "homeFeed": {
+      // This panel lists what the *document* holds, so an id this build does not
+      // know is shown as itself. `homeFeedOption` falls back to "Latest", which is
+      // the right thing for the picker — Home genuinely shows Latest — but wrong
+      // here: it would name a value the account has not stored, next to a Save
+      // button that would publish the other one.
+      const known = HOME_FEEDS.find((feed) => feed.id === settings.homeFeed);
+      return known
+        ? known.label
+        : `${settings.homeFeed} (set on another device)`;
+    }
     case "trendingWindowSeconds": {
       const hours = settings.trendingWindowSeconds / 3600;
       return hours >= 1
@@ -82,7 +91,9 @@ function describeValue(key: SettingKey, settings: SyncedSettings): string {
 }
 
 export function SyncSection() {
-  const sync = useSettingsSync();
+  // The app's one sync engine, not a second one. Reading the shared instance is
+  // what keeps what this panel shows and what it would publish the same object.
+  const sync = useSettingsSyncContext();
 
   return (
     <Panel title="Settings sync">

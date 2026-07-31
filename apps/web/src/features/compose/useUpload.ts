@@ -27,8 +27,14 @@ export const ACCEPTED_MEDIA =
  * `new URL(host).hostname` throws on a host the user typed badly — and it would
  * throw *inside the error handler*, replacing "could not reach that server" with an
  * unhandled exception during a failed upload.
+ *
+ * Exported for the same reason it exists. The composer names the host mid-upload,
+ * and a settings document written by another device carries `mediaHost` as an
+ * unvalidated string, so the bare `new URL()` this replaced was an unhandled throw
+ * *during render* — blanking the composer, with the user's text in it, at the moment
+ * their file was in flight.
  */
-function hostLabel(host: string): string {
+export function hostLabel(host: string): string {
   try {
     return new URL(host).hostname;
   } catch {

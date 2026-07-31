@@ -24,6 +24,7 @@ import { DiscoverPanel } from "../features/discover/DiscoverPanel";
 import { ExploreScreen } from "../features/explore/ExploreScreen";
 import { FeedPicker } from "../features/feed/FeedPicker";
 import {
+  asHomeFeedId,
   type HomeFeedId,
   homeFeedDefinition,
   NOTE_KINDS,
@@ -43,6 +44,10 @@ import { useSearchHotkey } from "../features/search/useSearchHotkey";
 import { SettingsScreen } from "../features/settings/SettingsScreen";
 import { type Route, routeTitle } from "../features/shell/routes";
 import { SetuSidebar } from "../features/shell/SetuSidebar";
+import {
+  setDeviceSettings,
+  useDeviceSettings,
+} from "../features/sync/localSettings";
 import { ThreadView } from "../features/thread/ThreadView";
 import { useNavigation } from "./useNavigation";
 
@@ -89,7 +94,25 @@ function HomeFeed({
   onOpenHashtag(tag: string): void;
 }) {
   const follows = useFollows();
-  const [feedId, setFeedId] = useState<HomeFeedId>("latest");
+
+  /*
+   * The chosen feed lives in the settings store, not in local state.
+   *
+   * It was `useState("latest")`, which meant the preference Settings displays as
+   * synced was written, shown, carried between devices — and then ignored on every
+   * load. Reading it here is the whole point of storing it.
+   *
+   * No mirror in state: the store is the single copy, so the picker cannot disagree
+   * with what Settings shows or with what the next reload restores. Writing on
+   * change is what makes the choice a preference rather than a session accident,
+   * and it is the same write Settings makes, through the same function.
+   */
+  const { homeFeed } = useDeviceSettings();
+  const feedId = asHomeFeedId(homeFeed);
+  const setFeedId = useCallback(
+    (id: HomeFeedId) => setDeviceSettings({ homeFeed: id }),
+    [],
+  );
 
   // Pinned at mount. A `since` recomputed every render would change the filter
   // identity every render, tearing the subscription down and rebuilding it — the
