@@ -111,6 +111,8 @@ export const Kind = {
   ProfileBadges: 30008,
   /** NIP-23 long-form article (addressable). */
   LongFormArticle: 30023,
+  /** NIP-38 user status (addressable, `d` names the kind of status). */
+  UserStatus: 30315,
   /** NIP-89 application handler (addressable). */
   AppHandler: 31990,
   /** NIP-51 follow pack (addressable). */

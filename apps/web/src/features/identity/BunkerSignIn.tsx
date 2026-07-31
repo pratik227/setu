@@ -14,6 +14,12 @@
  * standing signing capability in `localStorage`, which is the one thing
  * `identity/storage.ts` exists to refuse.
  *
+ * ## The invitation is shown twice
+ *
+ * As a QR code and as text, deliberately both — see `InviteQr.tsx`. A phone signer can
+ * only be reached by camera and a signer on this machine has no camera to reach it
+ * with, so offering one form would leave half the setups unable to pair.
+ *
  * ## The URI is masked
  *
  * A `bunker://` URI carries a `secret=` parameter that grants signing. It is typed
@@ -26,6 +32,7 @@ import { Button, cn } from "@setu/ui";
 import { Link2, QrCode, Radio } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthShell, Field } from "./authLayout";
+import { InviteQr } from "./InviteQr";
 import { DEFAULT_INVITE_RELAYS } from "./remoteSigner";
 import { type RemoteInviteHandle, useSession } from "./SessionProvider";
 
@@ -204,9 +211,16 @@ export function BunkerSignIn({ onBack }: { onBack(): void }) {
       {invite ? (
         <>
           <p className="text-xs text-muted-foreground">
-            Open this in your signer. Setu is listening on the relays below and
-            will connect as soon as it answers.
+            Scan this with your signer, or copy the link if your signer runs on
+            this computer. Setu is listening on the relays you named and will
+            connect as soon as it answers.
           </p>
+          <InviteQr uri={invite.uri} />
+          {/*
+           * The text stays, and not as a fallback. A signer running on this same
+           * machine has no camera to scan with, and a QR is the only way to reach
+           * one on a phone — each form covers a case the other cannot.
+           */}
           <code className="block max-h-32 overflow-auto rounded-lg border border-border bg-muted/60 p-3 font-mono text-xs break-all">
             {invite.uri}
           </code>

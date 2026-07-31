@@ -29,6 +29,12 @@
 import type { Timestamp } from "@setu/protocol";
 import type { EventStore } from "../contracts";
 import type { EvictingEventStore, RetentionPolicy } from "./retention";
+import type { StorageEstimate } from "./storagePressure";
+import {
+  policyForPressure,
+  readStorageEstimate,
+  shouldSweep,
+} from "./storagePressure";
 
 /** Opaque host timer handle; `number` in a browser, an object under Node. */
 export type TimerHandle = unknown;
@@ -59,6 +65,14 @@ export interface StoreMaintenanceOptions {
   /** Omit to sweep expirations only, evicting nothing. */
   readonly retention?: RetentionPolicy;
   readonly retentionIntervalMs?: number;
+  /**
+   * Source of the storage estimate, for quota-driven retention.
+   *
+   * Injected rather than read from `navigator` so this package stays free of DOM
+   * globals and so a test can drive a full disk without filling one. Omitted means
+   * pressure is `unknown`, which is the age-only behaviour.
+   */
+  readonly storageManager?: { estimate?: () => Promise<StorageEstimate> };
   readonly startupDelayMs?: number;
   readonly minDelayMs?: number;
   readonly maxDelayMs?: number;
@@ -98,7 +112,7 @@ export function sweepDelayMs(
 export function startStoreMaintenance(
   options: StoreMaintenanceOptions,
 ): () => void {
-  const { store, retention, onError } = options;
+  const { store, retention, onError, storageManager } = options;
   const setTimer: SetTimer =
     options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer: ClearTimer =
@@ -127,7 +141,19 @@ export function startStoreMaintenance(
         Date.now() - lastEvictionMs >= retentionIntervalMs
       ) {
         lastEvictionMs = Date.now();
-        await store.evictStale(retention);
+        /*
+         * How full storage is decides both *whether* to sweep and how far back.
+         *
+         * Retention was age-only, which never closed the loop it was written for:
+         * the policy existed to stay inside the quota and nothing asked what the
+         * quota was. An unmeasurable disk (`unknown`) keeps exactly the previous
+         * behaviour — see `storagePressure.ts` for why that is the safe fallback
+         * rather than assuming either extreme.
+         */
+        const pressure = await readStorageEstimate(storageManager);
+        if (shouldSweep(pressure.level)) {
+          await store.evictStale(policyForPressure(retention, pressure.level));
+        }
       }
     } catch (error) {
       // A failed pass must not stop the loop: the usual cause is a store that has

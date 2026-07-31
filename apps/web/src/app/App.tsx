@@ -43,6 +43,7 @@ import { useUnreadCount } from "../features/notifications/readState";
 import { ProfileScreen } from "../features/profile/ProfileScreen";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { useSearchHotkey } from "../features/search/useSearchHotkey";
+import { AboutScreen } from "../features/settings/AboutScreen";
 import { SettingsScreen } from "../features/settings/SettingsScreen";
 import { type Route, routeTitle } from "../features/shell/routes";
 import { SetuSidebar } from "../features/shell/SetuSidebar";
@@ -51,6 +52,7 @@ import {
   useDeviceSettings,
 } from "../features/sync/localSettings";
 import { ThreadView } from "../features/thread/ThreadView";
+import { WalletScreen } from "../features/wallet/WalletScreen";
 import { useNavigation } from "./useNavigation";
 
 function ThemeToggle() {
@@ -455,6 +457,10 @@ export function App() {
                 <SettingsScreen />
               ) : route.name === "messages" ? (
                 <ChatScreen onOpenProfile={openProfile} />
+              ) : route.name === "wallet" ? (
+                <WalletScreen />
+              ) : route.name === "about" ? (
+                <AboutScreen />
               ) : route.name === "bookmarks" ? (
                 <BookmarksScreen
                   onOpenThread={openThread}

@@ -40,6 +40,19 @@ export {
   isReplaceable,
   Kind,
 } from "./kinds";
+export {
+  decryptNip04,
+  encryptNip04,
+  looksLikeNip04,
+  Nip04Error,
+} from "./nip04";
+export type { MineOptions, MineResult } from "./nip13";
+export {
+  committedDifficulty,
+  eventDifficulty,
+  leadingZeroBits,
+  mineEvent,
+} from "./nip13";
 export type { ChatMessage, ChatMessageInput } from "./nip17";
 export {
   buildChatMessage,
@@ -76,6 +89,12 @@ export {
 } from "./nip19";
 export type { EmojiSegment } from "./nip30";
 export { emojiSegments, emojiTagMap, isSoleShortcode } from "./nip30";
+export type { UserStatus, UserStatusKind } from "./nip38";
+export {
+  currentUserStatus,
+  isStatusExpired,
+  parseUserStatus,
+} from "./nip38";
 export {
   buildAuthEvent,
   CLIENT_AUTH_KIND,
@@ -84,6 +103,36 @@ export {
   isRestricted,
   sameRelay,
 } from "./nip42";
+export type {
+  Msat,
+  WalletConnection,
+  WalletErrorCode,
+  WalletMethod,
+  WalletRequest,
+  WalletResponse,
+  WalletUriError,
+  WalletUriResult,
+} from "./nip47";
+export {
+  balanceFromResult,
+  buildWalletRequest,
+  msat,
+  msatFromSat,
+  parseWalletInfo,
+  parseWalletResponse,
+  parseWalletUri,
+  satFromMsat,
+  supportsNip44,
+  WALLET_ERROR_CODES,
+  WALLET_INFO_KIND,
+  WALLET_NOTIFICATION_NIP04_KIND,
+  WALLET_NOTIFICATION_NIP44_KIND,
+  WALLET_REQUEST_KIND,
+  WALLET_RESPONSE_KIND,
+  walletErrorMessage,
+  walletRequestPayload,
+  walletUriMessage,
+} from "./nip47";
 export type { KeySecurityByte } from "./nip49";
 export {
   DEFAULT_LOG_N,
@@ -144,8 +193,11 @@ export { parseDim, parseImeta, parseImetaTag } from "./nip92";
 export type {
   BunkerUri,
   Nip07Provider,
+  Nip46Frame,
+  Nip46Health,
   Nip46Request,
   Nip46Response,
+  Nip46Scheme,
   Nip46SignerOptions,
   Nip46SubscribeParams,
   Nip46Transport,
@@ -160,6 +212,7 @@ export {
   buildNostrConnectUri,
   DEFAULT_CONNECT_TIMEOUT_MS,
   DEFAULT_HANDSHAKE_TIMEOUT_MS,
+  DEFAULT_KEEPALIVE_MS,
   DEFAULT_PERMISSIONS,
   DEFAULT_REQUEST_TIMEOUT_MS,
   encodeRequest,
@@ -174,6 +227,7 @@ export {
   LocalSigner,
   NIP46_KIND,
   Nip07Signer,
+  Nip46Codec,
   Nip46Pending,
   Nip46Signer,
   newRequestId,
@@ -183,6 +237,8 @@ export {
   parseSecretKey,
   ReadonlySigner,
   redactBunkerUri,
+  SCHEME_PROBE_MS,
+  schemeOf,
   startNostrConnect,
 } from "./signers";
 export type { HasTags, ParsedAddress, ThreadRefs } from "./tags";

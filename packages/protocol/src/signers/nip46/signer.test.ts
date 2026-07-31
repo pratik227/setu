@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyEventSignature } from "../../event";
+import { decryptNip04, encryptNip04 } from "../../nip04";
 import type { Hex32, NostrEvent } from "../../types";
 import { generateSecretKey, LocalSigner } from "../local";
+import { type Nip46Scheme, schemeOf } from "./codec";
+import { startNostrConnect } from "./connect";
 import type { Nip46Response } from "./rpc";
-import { Nip46Signer, startNostrConnect } from "./signer";
+import { type Nip46Health, Nip46Signer } from "./signer";
 import {
   NIP46_KIND,
   type Nip46SubscribeParams,
@@ -21,17 +24,35 @@ interface SeenRequest {
   readonly params: readonly string[];
 }
 
+/** One frame as the fake received it, whether or not it could open it. */
+interface SeenFrame {
+  readonly scheme: Nip46Scheme;
+  readonly readable: boolean;
+}
+
 /**
  * A remote signer at the other end of the transport seam.
  *
- * Real NIP-44 in both directions and a real account key doing the signing, because
+ * Real encryption in both directions and a real account key doing the signing, because
  * the cases worth testing — an answer for the wrong account, a reply from a key we
- * never asked — are exactly the ones a stubbed-out crypto layer cannot express.
+ * never asked, a signer that cannot read the envelope at all — are exactly the ones a
+ * stubbed-out crypto layer cannot express.
+ *
+ * `reads` is what makes a legacy signer expressible. A signer that cannot decrypt a
+ * frame has no way to say so, so this fake does what a real one does: nothing at all.
  */
 class FakeBunker implements Nip46Transport {
-  readonly signer = LocalSigner.fromSecretKey(generateSecretKey());
+  /** Kept as bytes as well, because NIP-04 needs the raw key. */
+  readonly signerSecret = generateSecretKey();
+  readonly signer = LocalSigner.fromSecretKey(this.signerSecret);
   readonly account = LocalSigner.fromSecretKey(generateSecretKey());
   readonly requests: SeenRequest[] = [];
+  /** Every frame handed to this fake, in order, readable or not. */
+  readonly frames: SeenFrame[] = [];
+  /** Which encryptions this signer understands. */
+  reads: readonly Nip46Scheme[] = ["nip44"];
+  /** Which encryption it answers in. Defaults to whatever it was asked in. */
+  answersIn?: Nip46Scheme;
   publishFails = false;
   /** Override the default behaviour for one method; `undefined` falls through. */
   reply: (request: SeenRequest) => Answer | undefined = () => undefined;
@@ -62,12 +83,26 @@ class FakeBunker implements Nip46Transport {
 
   async publish(event: NostrEvent): Promise<void> {
     if (this.publishFails) throw new Error("no relay accepted it");
-    const payload = await this.signer.nip44Decrypt(event.pubkey, event.content);
+    const scheme = schemeOf(event.content);
+    const readable = this.reads.includes(scheme);
+    this.frames.push({ scheme, readable });
+    if (!readable) return;
+    const payload = await this.read(event.pubkey, event.content, scheme);
     const parsed = JSON.parse(payload) as SeenRequest;
     this.requests.push(parsed);
     const answer = this.reply(parsed) ?? (await this.defaultAnswer(parsed));
     if (answer === "silence") return;
-    await this.send(event.pubkey, { ...answer, id: parsed.id });
+    await this.send(
+      event.pubkey,
+      { ...answer, id: parsed.id },
+      this.signer,
+      this.answersIn ?? scheme,
+    );
+  }
+
+  /** Frames of one scheme, for asserting what did and did not go out. */
+  framesIn(scheme: Nip46Scheme): readonly SeenFrame[] {
+    return this.frames.filter((frame) => frame.scheme === scheme);
   }
 
   /** The id of the last request for a method, so a test can answer it by hand. */
@@ -82,11 +117,15 @@ class FakeBunker implements Nip46Transport {
     clientPubkey: Hex32,
     response: Nip46Response,
     from: LocalSigner = this.signer,
+    scheme: Nip46Scheme = "nip44",
   ): Promise<void> {
-    const content = await from.nip44Encrypt(
-      clientPubkey,
-      JSON.stringify(response),
-    );
+    const json = JSON.stringify(response);
+    // NIP-04 needs the raw secret, which only this fake's own signer key exposes,
+    // so the impostor cases (`from` set to a stranger) are all NIP-44.
+    const content =
+      scheme === "nip04"
+        ? encryptNip04(this.signerSecret, clientPubkey, json)
+        : await from.nip44Encrypt(clientPubkey, json);
     const event = await from.signEvent({
       kind: NIP46_KIND,
       content,
@@ -95,6 +134,16 @@ class FakeBunker implements Nip46Transport {
     for (const listener of this.listeners) {
       if (listener.clientPubkey === clientPubkey) listener.onEvent(event);
     }
+  }
+
+  private read(
+    peer: Hex32,
+    content: string,
+    scheme: Nip46Scheme,
+  ): Promise<string> {
+    return scheme === "nip04"
+      ? Promise.resolve(decryptNip04(this.signerSecret, peer, content))
+      : this.signer.nip44Decrypt(peer, content);
   }
 
   private async defaultAnswer(
@@ -227,9 +276,15 @@ describe("Nip46Signer approval prompts", () => {
       result: "auth_url",
       error: "https://bunker.example/approve",
     });
-    expect(onAuthChallenge).toHaveBeenCalledWith(
-      "https://bunker.example/approve",
-      "sign_event",
+    // Waited for rather than asserted straight after `send`: an inbound frame is
+    // decrypted asynchronously, and how many microtasks that takes is an internal
+    // detail of the codec — a test that depends on the exact number fails the next
+    // time a scheme check is added to the decrypt path.
+    await vi.waitFor(() =>
+      expect(onAuthChallenge).toHaveBeenCalledWith(
+        "https://bunker.example/approve",
+        "sign_event",
+      ),
     );
     const signed = await bunker.account.signEvent({
       kind: 1,
@@ -443,5 +498,236 @@ describe("startNostrConnect", () => {
     });
     handshake.cancel();
     await expect(handshake.signer).rejects.toThrow(/cancelled/);
+  });
+});
+
+/** Waits past a probe deadline. Real timers, because the probe uses one. */
+const settle = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/** The client key's public half, needed before `connect` has resolved. */
+const clientPubkeyOf = () =>
+  LocalSigner.fromSecretKey(clientSecret).pubkeySync();
+
+describe("a signer that speaks only NIP-04", () => {
+  it("is reachable at all, rather than looking asleep", async () => {
+    /*
+     * The gap this closes. A legacy signer cannot decrypt a NIP-44 request and has no
+     * way to say so, so before the NIP-04 copy existed the connection failed on its
+     * deadline with "the remote signer did not answer" — pointing the user at their
+     * phone when the problem was the envelope. The fake reproduces exactly that: an
+     * unreadable frame produces no reply and no error.
+     */
+    bunker.reads = ["nip04"];
+    const signer = await connect({
+      schemeProbeMs: 20,
+      connectTimeoutMs: 2000,
+      timeoutMs: 2000,
+    });
+    expect(await signer.pubkey()).toBe(bunker.accountPubkey);
+    // Modern first, always: the copy is a fallback, not the default.
+    expect(bunker.frames[0]).toEqual({ scheme: "nip44", readable: false });
+    expect(bunker.framesIn("nip04")).toContainEqual({
+      scheme: "nip04",
+      readable: true,
+    });
+    signer.close();
+  });
+
+  it("is not asked in NIP-44 again once it has answered", async () => {
+    // Otherwise every single request pays the probe delay for the whole life of the
+    // connection, and posting a note takes seconds longer than it needs to.
+    bunker.reads = ["nip04"];
+    const signer = await connect({
+      schemeProbeMs: 20,
+      connectTimeoutMs: 2000,
+      timeoutMs: 2000,
+    });
+    const before = bunker.frames.length;
+    await signer.ping();
+    expect(bunker.frames.slice(before).map((frame) => frame.scheme)).toEqual([
+      "nip04",
+    ]);
+    signer.close();
+  });
+
+  it("still has its answers checked as strictly as a modern one", async () => {
+    // A weaker envelope must not buy a weaker check. NIP-04 has no integrity at all,
+    // so if anything the signed-by-the-wrong-key case matters *more* here.
+    bunker.reads = ["nip04"];
+    const signer = await connect({
+      schemeProbeMs: 20,
+      connectTimeoutMs: 2000,
+      timeoutMs: 2000,
+    });
+    const forged = await LocalSigner.generate().signEvent({
+      kind: 1,
+      content: "not yours",
+    });
+    bunker.reply = (request) =>
+      request.method === "sign_event"
+        ? { result: JSON.stringify(forged) }
+        : undefined;
+    await expect(signer.signEvent({ kind: 1, content: "x" })).rejects.toThrow(
+      /signed by a different key/,
+    );
+    signer.close();
+  });
+});
+
+describe("a signer that speaks NIP-44", () => {
+  it("is never sent a NIP-04 copy of anything", async () => {
+    // A downgrade nobody forced gives up NIP-44's integrity for nothing, and a second
+    // copy of a request is a second thing the signer may prompt about.
+    const signer = await connect({ schemeProbeMs: 20 });
+    await signer.ping();
+    await settle(60);
+    expect(bunker.framesIn("nip04")).toHaveLength(0);
+    signer.close();
+  });
+
+  it("is not asked twice while it is waiting on a human", async () => {
+    /*
+     * `auth_url` is a signer saying "I read this and I am asking the user". Sending
+     * the NIP-04 copy after that would put a second approval prompt on their phone
+     * for one action — so any frame that decrypts cancels the probe.
+     */
+    bunker.reads = ["nip44", "nip04"];
+    const onAuthChallenge = vi.fn();
+    bunker.reply = (request) =>
+      request.method === "connect" ? "silence" : undefined;
+    // Comfortably longer than the poll below takes to notice the request: the
+    // assertion is about the probe being *cancelled*, not about winning a race.
+    const connecting = connect({
+      schemeProbeMs: 250,
+      connectTimeoutMs: 3000,
+      timeoutMs: 3000,
+      onAuthChallenge,
+    });
+    const client = clientPubkeyOf();
+    await vi.waitFor(() => bunker.lastId("connect"));
+    const id = bunker.lastId("connect");
+    await bunker.send(client, {
+      id,
+      result: "auth_url",
+      error: "https://bunker.example/approve",
+    });
+    await vi.waitFor(() => expect(onAuthChallenge).toHaveBeenCalled());
+    await settle(300);
+    expect(bunker.framesIn("nip04")).toHaveLength(0);
+    await bunker.send(client, { id, result: "ack" });
+    const signer = await connecting;
+    signer.close();
+  });
+
+  it("carries the scheme learned during a nostrconnect handshake into the signer", async () => {
+    // The echo is the one frame a signer sends before we ask it anything, so it is
+    // free evidence. Throwing it away would make the new connection re-probe a peer
+    // whose scheme is already settled — and for a legacy signer that means the first
+    // real request goes out in an envelope it cannot open.
+    bunker.reads = ["nip04"];
+    const handshake = startNostrConnect({
+      transport: bunker,
+      clientSecret,
+      relays: RELAYS,
+      secret: "abc123",
+      timeoutMs: 2000,
+      handshakeTimeoutMs: 2000,
+    });
+    await bunker.send(
+      handshake.clientPubkey,
+      { id: "1", result: "abc123" },
+      bunker.signer,
+      "nip04",
+    );
+    const signer = await handshake.signer;
+    // `get_public_key` went straight out in NIP-04: no unreadable frame, no probe.
+    expect(bunker.framesIn("nip44")).toHaveLength(0);
+    expect(await signer.pubkey()).toBe(bunker.accountPubkey);
+    signer.close();
+  });
+});
+
+describe("keep-alive", () => {
+  it("pings only while the connection is idle", async () => {
+    // A ping racing a real request costs the user latency on the one call they are
+    // watching, and a request that is being answered is better evidence anyway.
+    const signer = await connect({ keepAliveMs: 40 });
+    await vi.waitFor(() =>
+      expect(bunker.requests.some((r) => r.method === "ping")).toBe(true),
+    );
+    signer.close();
+  });
+
+  it("reports a signer that has gone away, and says so on the next request", async () => {
+    /*
+     * The failure this exists for: an idle bunker connection dies silently, and
+     * without a heartbeat the user discovers it by pressing Post and watching a
+     * spinner for the full request deadline, after which the error blames the signer
+     * for not answering a request it never received. Here the connection is known
+     * dead before the user asks for anything, and the request that follows says
+     * "reconnect" instead.
+     */
+    const health: Nip46Health[] = [];
+    const signer = await connect({
+      keepAliveMs: 20,
+      timeoutMs: 40,
+      onHealth: (next) => health.push(next),
+    });
+    bunker.reply = () => "silence";
+    await vi.waitFor(() => expect(health).toEqual(["unreachable"]), {
+      timeout: 3000,
+    });
+    expect(signer.health).toBe("unreachable");
+    await expect(signer.signEvent({ kind: 1, content: "x" })).rejects.toThrow(
+      /needs to be reconnected/,
+    );
+    signer.close();
+  });
+
+  it("goes back to alive when the signer returns", async () => {
+    // A relay reconnect drops a ping, and a connection that could never recover from
+    // being called dead would send the user to the sign-in screen over a blip.
+    const health: Nip46Health[] = [];
+    const signer = await connect({
+      keepAliveMs: 20,
+      timeoutMs: 40,
+      onHealth: (next) => health.push(next),
+    });
+    bunker.reply = () => "silence";
+    await vi.waitFor(() => expect(health).toEqual(["unreachable"]), {
+      timeout: 3000,
+    });
+    bunker.reply = () => undefined;
+    await vi.waitFor(() => expect(health.at(-1)).toBe("alive"), {
+      timeout: 3000,
+    });
+    signer.close();
+  });
+
+  it("counts an error reply as proof of life", async () => {
+    // A signer old enough to lack `ping` answers `{"error":"unknown method"}`. That is
+    // a live signer, and treating the rejected ping as a miss would declare a working
+    // connection dead every couple of minutes.
+    const health: Nip46Health[] = [];
+    const signer = await connect({
+      keepAliveMs: 20,
+      timeoutMs: 40,
+      onHealth: (next) => health.push(next),
+    });
+    bunker.reply = (request) =>
+      request.method === "ping" ? { error: "unknown method ping" } : undefined;
+    await settle(200);
+    expect(health).toEqual([]);
+    expect(signer.health).toBe("alive");
+    signer.close();
+  });
+
+  it("is off unless a caller asks for it", async () => {
+    // The protocol package must not start a repeating timer nobody asked for: a
+    // headless or test caller has no idle socket to protect and no way to stop one.
+    const signer = await connect();
+    await settle(120);
+    expect(bunker.requests.some((r) => r.method === "ping")).toBe(false);
+    signer.close();
   });
 });

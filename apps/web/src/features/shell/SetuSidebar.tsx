@@ -20,12 +20,14 @@ import {
   Compass,
   Hash,
   Home,
+  Info,
   MessageCircle,
   PenLine,
   PenSquare,
   Search,
   Settings,
   User,
+  Wallet,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -143,6 +145,17 @@ export function SetuSidebar({
           onClick={() => onNavigate({ name: "bookmarks" })}
         >
           Bookmarks
+        </SidebarRow>
+        {/* A destination of its own rather than a panel inside Settings. A wallet is
+            something you check, not something you configure once — and a balance
+            buried three scrolls into a settings page is a balance nobody looks at. */}
+        <SidebarRow
+          icon={<Wallet />}
+          size="lg"
+          active={sameRoute(route, { name: "wallet" })}
+          onClick={() => onNavigate({ name: "wallet" })}
+        >
+          Wallet
         </SidebarRow>
         {session ? (
           <SidebarRow
@@ -265,6 +278,19 @@ export function SetuSidebar({
             Not signed in
           </span>
         )}
+        {/* Beside Settings rather than inside it. Who made this, and how to support
+            it, is not a preference — and at the bottom of a settings page it was
+            reachable only by someone already scrolling for something else. */}
+        <Tooltip label="About Setu">
+          <Button
+            variant="chrome"
+            size="icon-xs"
+            aria-label="About Setu"
+            onClick={() => onNavigate({ name: "about" })}
+          >
+            <Info />
+          </Button>
+        </Tooltip>
         <Tooltip label="Settings">
           <Button
             variant="chrome"

@@ -187,9 +187,12 @@
   border-right-color: transparent;
 }
 
-:root[data-setu-gradient] [data-setu-content-surface] {
-  border-inline-color: transparent;
-}
+/*
+ * No `border-inline-color` reset here any more: the content surface carries no
+ * vertical borders in the first place (see `AppShell.tsx`). Both seams are drawn by
+ * the neighbours — the sidebar edge above and `AuxiliaryPanel` — so there is nothing
+ * on the surface for gradient mode to hide.
+ */
 
 /* Only in gradient mode does content read as a sheet tucked under the chrome. */
 :root[data-setu-gradient] [data-setu-content-surface] {

@@ -161,6 +161,21 @@ export {
   EVICTABLE_KINDS,
   isEvictable,
 } from "./store/retention";
+export type {
+  PressureLevel,
+  StorageEstimate,
+  StoragePressure,
+} from "./store/storagePressure";
+export {
+  CRITICAL_PRESSURE_RATIO,
+  classifyStorage,
+  HIGH_PRESSURE_RATIO,
+  MINIMUM_RETENTION_SECONDS,
+  policyForPressure,
+  readStorageEstimate,
+  retentionSecondsFor,
+  shouldSweep,
+} from "./store/storagePressure";
 export type { DeletionTargets, TombstoneRecord } from "./store/tombstones";
 export {
   addressTombstoneKey,
@@ -226,6 +241,24 @@ export type {
   SearchRouting,
   SearchRoutingInput,
 } from "./relay/searchRouting";
+export type {
+  ContentClass,
+  RelayScore,
+  RelayScorecard,
+} from "./relay/relayScorecard";
+export {
+  classesForKinds,
+  contentClassOf,
+  orderByDelivery,
+  SCORED_KINDS,
+  scoreRows,
+  scorecardQueries,
+} from "./relay/relayScorecard";
+export type {
+  RelayScorecardSource,
+  RelayScorecardSourceOptions,
+} from "./relay/relayScorecardSource";
+export { createRelayScorecardSource } from "./relay/relayScorecardSource";
 export {
   MIN_SEARCH_QUERY_LENGTH,
   planRelaySearch,

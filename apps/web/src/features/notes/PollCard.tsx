@@ -151,7 +151,15 @@ export function PollCard({ note, emoji = NO_EMOJI }: PollCardProps) {
     setState({ status: "working" });
     void (async () => {
       try {
-        const outcome = await publish(buildPollResponse(poll, [...draft]));
+        // The poll's own `relay` hints, on top of this account's write relays.
+        // NIP-65 answers "where do my followers read me", which is not the question a
+        // vote asks: a response is only counted if it reaches where the poll's author
+        // is counting. `nip88.ts` explains why `buildPollResponse` cannot do this
+        // itself — a template has no destination.
+        const outcome = await publish(
+          buildPollResponse(poll, [...draft]),
+          poll.relays,
+        );
         if (!outcome.accepted) {
           setState({
             status: "error",

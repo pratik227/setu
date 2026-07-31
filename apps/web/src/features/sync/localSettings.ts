@@ -35,19 +35,21 @@ import type { SyncBaseline } from "./syncDecision";
 /** The settings this store owns: everything except appearance. */
 export type DeviceSettings = Pick<
   SyncedSettings,
-  "homeFeed" | "trendingWindowSeconds" | "mediaHost"
+  "homeFeed" | "trendingWindowSeconds" | "mediaHost" | "powDifficulty"
 >;
 
 export const DEVICE_SETTING_KEYS = [
   "homeFeed",
   "trendingWindowSeconds",
   "mediaHost",
+  "powDifficulty",
 ] as const satisfies readonly (keyof DeviceSettings)[];
 
 export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   homeFeed: DEFAULT_SETTINGS.homeFeed,
   trendingWindowSeconds: DEFAULT_SETTINGS.trendingWindowSeconds,
   mediaHost: DEFAULT_SETTINGS.mediaHost,
+  powDifficulty: DEFAULT_SETTINGS.powDifficulty,
 };
 
 /**
@@ -103,6 +105,16 @@ function readDevice(): DeviceSettings {
         typeof object.mediaHost === "string" && object.mediaHost !== ""
           ? object.mediaHost
           : DEFAULT_DEVICE_SETTINGS.mediaHost,
+      // Validated the same way the wire document validates it, and for a sharper
+      // reason: this value is read on the publish path, where a `"20"` or a `20.5`
+      // reaching the miner would mean a note that either never mines or mines for a
+      // cost nobody chose. A bad row falls back to off.
+      powDifficulty:
+        typeof object.powDifficulty === "number" &&
+        Number.isInteger(object.powDifficulty) &&
+        object.powDifficulty >= 0
+          ? object.powDifficulty
+          : DEFAULT_DEVICE_SETTINGS.powDifficulty,
     };
   } catch {
     // A corrupt row is not worth a broken app: fall back to defaults and let the

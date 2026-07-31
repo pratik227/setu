@@ -81,6 +81,11 @@ describe("deviceSettings", () => {
     ['{"trendingWindowSeconds":"3600"}', DEFAULT_DEVICE_SETTINGS],
     ['{"trendingWindowSeconds":-5}', DEFAULT_DEVICE_SETTINGS],
     ['{"homeFeed":""}', DEFAULT_DEVICE_SETTINGS],
+    // Read on the publish path: a difficulty that is not a whole number of bits
+    // must fall back to off rather than reach the miner.
+    ['{"powDifficulty":"20"}', DEFAULT_DEVICE_SETTINGS],
+    ['{"powDifficulty":20.5}', DEFAULT_DEVICE_SETTINGS],
+    ['{"powDifficulty":-1}', DEFAULT_DEVICE_SETTINGS],
   ])("survives a corrupt row (%o)", (raw, expected) => {
     rows.set("setu-settings", raw);
     resetDeviceSettingsCache();
@@ -114,6 +119,7 @@ describe("effectiveSettings", () => {
       homeFeed: DEFAULT_SETTINGS.homeFeed,
       trendingWindowSeconds: DEFAULT_SETTINGS.trendingWindowSeconds,
       mediaHost: "https://files.example",
+      powDifficulty: DEFAULT_SETTINGS.powDifficulty,
     });
   });
 });

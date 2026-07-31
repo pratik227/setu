@@ -48,6 +48,7 @@ describe("splitSettingsFields", () => {
       homeFeed: "global-24h",
       trendingWindowSeconds: 3600,
       mediaHost: "https://files.example",
+      powDifficulty: 20,
     });
     expect(read).toEqual({
       themeMode: "dark",
@@ -56,6 +57,7 @@ describe("splitSettingsFields", () => {
       homeFeed: "global-24h",
       trendingWindowSeconds: 3600,
       mediaHost: "https://files.example",
+      powDifficulty: 20,
     });
   });
 
@@ -93,6 +95,11 @@ describe("splitSettingsFields", () => {
     ["trendingWindowSeconds", -1],
     ["trendingWindowSeconds", Number.NaN],
     ["mediaHost", null],
+    // A fractional or negative difficulty is not a number of bits, and a string one
+    // reaching the publish path would mine for a cost nobody chose.
+    ["powDifficulty", 20.5],
+    ["powDifficulty", -1],
+    ["powDifficulty", "20"],
   ])("falls back for a malformed %s of %o", (key, value) => {
     const { settings: read } = splitSettingsFields({ [key]: value });
     expect(read[key as keyof SyncedSettings]).toBe(

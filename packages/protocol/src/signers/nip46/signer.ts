@@ -2,10 +2,10 @@
  * NIP-46 remote ("bunker") signer.
  *
  * The account's key lives in another program. Every operation is a JSON-RPC call
- * encrypted with NIP-44 between a *client key* Setu generates and the signer's key,
- * carried as kind-24133 events over relays the signer named. The client key is not
- * the account: it is a per-connection identity whose only privilege is the one the
- * user granted when they approved the connection.
+ * encrypted between a *client key* Setu generates and the signer's key, carried as
+ * kind-24133 events over relays the signer named. The client key is not the account:
+ * it is a per-connection identity whose only privilege is the one the user granted
+ * when they approved the connection.
  *
  * ## What must be checked on the way back in
  *
@@ -23,6 +23,29 @@
  *    spends the most effort on, because a signer that never answers is the normal
  *    case, not the exceptional one.
  *
+ * ## Two encryptions, chosen by evidence
+ *
+ * Requests go out in NIP-44 and replies are read in whichever scheme they arrive in
+ * (`codec.ts`). A signer that answers in NIP-04 has proved it cannot read NIP-44, so
+ * everything after that point is sent in NIP-04 too — and because a signer that cannot
+ * read our first request also cannot tell us so, the *first* request is followed by a
+ * NIP-04 copy if nothing at all comes back within {@link SCHEME_PROBE_MS}. Without
+ * that copy a legacy signer is unreachable and looks exactly like a signer that is
+ * asleep. The copy is deliberately late and deliberately conditional: an `auth_url`,
+ * or any other frame on the same id, cancels it, so a signer that reads both schemes
+ * and is merely waiting on a human is not asked twice.
+ *
+ * ## An idle connection is proved, not assumed
+ *
+ * A bunker session is mostly idle — read for twenty minutes, then post — and relays
+ * drop idle subscriptions and sockets. With `keepAliveMs` set, a `ping` goes out
+ * whenever nothing has been heard for that long, which both keeps the socket in use
+ * and turns a signer that has gone away into a *known* state within a couple of
+ * intervals instead of a surprise at the moment the user presses Post. Once the
+ * connection is known dead, requests stop waiting the full deadline for it and say so
+ * — the point is that "reconnect your signer" reaches the user instead of a
+ * twenty-second spinner followed by a timeout that blames the signer's silence.
+ *
  * ## Private messages
  *
  * `nip44Encrypt`/`nip44Decrypt` are always present, and they delegate. They cannot be
@@ -34,7 +57,7 @@
  */
 
 import { isValidEventShape } from "../../event";
-import { bytesToHex, isHex32 } from "../../hex";
+import { isHex32 } from "../../hex";
 import type {
   EventTemplate,
   Hex32,
@@ -43,6 +66,7 @@ import type {
 } from "../../types";
 import { SignerError } from "../../types";
 import { LocalSigner } from "../local";
+import { Nip46Codec, type Nip46Scheme } from "./codec";
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   encodeRequest,
@@ -55,7 +79,6 @@ import {
   type Nip46Transport,
   type Nip46Unsubscribe,
 } from "./transport";
-import { buildNostrConnectUri } from "./uri";
 
 /**
  * How long to wait for the connection handshake, as opposed to a routine call.
@@ -66,9 +89,6 @@ import { buildNostrConnectUri } from "./uri";
  */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 90_000;
 
-/** How long to hold a `nostrconnect://` URI open for a signer to scan it. */
-export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 180_000;
-
 /**
  * How far back the reply subscription reaches.
  *
@@ -77,7 +97,7 @@ export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 180_000;
  * happily withhold from a `since` we computed locally. A few minutes of slack costs
  * nothing — there is nothing else addressed to a freshly generated client key.
  */
-const SUBSCRIBE_SKEW_SECONDS = 300;
+export const SUBSCRIBE_SKEW_SECONDS = 300;
 
 /** Permissions Setu asks for. Narrow on purpose; a bunker may grant less. */
 export const DEFAULT_PERMISSIONS = [
@@ -87,23 +107,66 @@ export const DEFAULT_PERMISSIONS = [
   "nip44_decrypt",
 ] as const;
 
-/** See `rpc.ts`: the DOM `Crypto` type is absent when the CLI typechecks this. */
-interface RandomSource {
-  getRandomValues(bytes: Uint8Array): Uint8Array;
-}
+/**
+ * Keep-alive interval the app opts into.
+ *
+ * Well under the idle timeout of the relays that host bunkers, which cluster around
+ * a few minutes, and long enough that a reading session is not a stream of pings.
+ * Off unless a caller passes it: the protocol package must not start a repeating
+ * timer nobody asked for, and a headless or test caller has no idle socket to protect.
+ */
+export const DEFAULT_KEEPALIVE_MS = 60_000;
 
-/** A CSPRNG connection secret for `nostrconnect://`. */
-export function generateConnectSecret(): string {
-  const bytes = new Uint8Array(16);
-  const crypto = (globalThis as { crypto?: RandomSource }).crypto;
-  if (crypto?.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  } else {
-    throw new SignerError(
-      "no CSPRNG available; a guessable connection secret would let a bystander claim the connection",
-    );
-  }
-  return bytesToHex(bytes);
+/**
+ * How long a keep-alive ping waits before it counts as a miss.
+ *
+ * Much shorter than a user-facing request: nobody is watching this one, and its whole
+ * job is to answer "is the connection there" quickly enough that the answer is still
+ * true when the user next needs it.
+ */
+const KEEPALIVE_PING_TIMEOUT_MS = 10_000;
+
+/**
+ * Silent pings before the connection is declared dead.
+ *
+ * One is not enough. A single dropped ping happens whenever a relay is reconnecting,
+ * and reporting that as "your signer is gone" would train the user to ignore the
+ * warning that matters.
+ */
+const KEEPALIVE_MISSES = 2;
+
+/**
+ * Deadline for a request made while the connection is known unreachable.
+ *
+ * The point of detecting death is not to refuse outright — the signer may have come
+ * back in the last second, and refusing a post on stale information is worse than a
+ * short wait. It is to stop spending twenty seconds re-learning something the
+ * heartbeat already established.
+ */
+const UNREACHABLE_TIMEOUT_MS = 5_000;
+
+/** How long a NIP-44 request waits alone before a NIP-04 copy follows it. */
+export const SCHEME_PROBE_MS = 8_000;
+
+/** Whether the connection is answering. See the module note on keep-alive. */
+export type Nip46Health = "alive" | "unreachable";
+
+/**
+ * A timer for background work, which must never be why a process stays alive.
+ *
+ * The heartbeat reschedules itself for as long as the connection exists. Under Node —
+ * `apps/cli`, and every test run — a pending timer holds the event loop open, so a
+ * heartbeat without `unref` turns a finished program into one that hangs for an
+ * interval it has no further use for. `unref` does not exist in a browser, where
+ * there is no event loop to hold open, hence the optional call rather than a cast.
+ */
+function background(
+  run: () => void,
+  ms: number,
+): ReturnType<typeof setTimeout> {
+  const timer = setTimeout(run, ms);
+  (timer as unknown as { unref?: () => void }).unref?.();
+  return timer;
 }
 
 export interface Nip46SignerOptions {
@@ -121,6 +184,25 @@ export interface Nip46SignerOptions {
   readonly timeoutMs?: number;
   readonly onAuthChallenge?: (url: string, method: string) => void;
   readonly now?: () => number;
+  /**
+   * The encryption this peer has already been *seen* using, if the caller knows.
+   *
+   * Set by `startNostrConnect`, which has read a frame from the signer before this
+   * object exists. Without it that evidence is thrown away and the new connection
+   * re-probes a peer whose scheme is already established. Never a guess: a caller
+   * that has not seen a frame must leave it undefined.
+   */
+  readonly peerScheme?: Nip46Scheme;
+  /**
+   * Ping the signer whenever nothing has been heard for this long. Omit for none.
+   *
+   * See {@link DEFAULT_KEEPALIVE_MS}.
+   */
+  readonly keepAliveMs?: number;
+  /** Called on each change of {@link Nip46Signer.health}, never on repeats. */
+  readonly onHealth?: (health: Nip46Health) => void;
+  /** Overridable for tests; see {@link SCHEME_PROBE_MS}. */
+  readonly schemeProbeMs?: number;
 }
 
 /** Signs by asking a remote signer over relays. */
@@ -128,18 +210,32 @@ export class Nip46Signer implements NostrSigner {
   readonly kind = "nip46" as const;
 
   private readonly client: LocalSigner;
+  private readonly codec: Nip46Codec;
   private readonly pending: Nip46Pending;
   private readonly timeoutMs: number;
+  private readonly probeMs: number;
   private readonly now: () => number;
   private unsubscribe?: Nip46Unsubscribe;
   private cachedPubkey?: Hex32;
   private closed = false;
+  /** What the peer has been observed reading. Undefined until it says something. */
+  private peerScheme?: Nip46Scheme;
+  private state: Nip46Health = "alive";
+  private misses = 0;
+  /** Wall-clock ms of the last frame that decrypted from the signer. */
+  private lastHeardAt = Date.now();
+  private keepAliveTimer?: ReturnType<typeof setTimeout>;
+  /** Outstanding NIP-04 probes, so `close` does not leave timers behind. */
+  private readonly probeTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Bounded, because a reply arrives once per relay and decryption is not free. */
   private readonly seen = new Set<string>();
 
   constructor(private readonly options: Nip46SignerOptions) {
     this.client = LocalSigner.fromSecretKey(options.clientSecret);
+    this.codec = new Nip46Codec(options.clientSecret);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.probeMs = options.schemeProbeMs ?? SCHEME_PROBE_MS;
+    this.peerScheme = options.peerScheme;
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
     this.pending = new Nip46Pending({
       ...(options.onAuthChallenge
@@ -161,6 +257,18 @@ export class Nip46Signer implements NostrSigner {
   /** The relays this connection talks over. */
   get relays(): readonly string[] {
     return this.options.relays;
+  }
+
+  /**
+   * Whether the connection is currently believed to be answering.
+   *
+   * Only ever `"unreachable"` when a keep-alive is running and has missed
+   * {@link KEEPALIVE_MISSES} pings in a row — without one there is no evidence
+   * either way, and claiming a connection is dead because nobody asked it anything
+   * would be a worse lie than assuming it is fine.
+   */
+  get health(): Nip46Health {
+    return this.state;
   }
 
   /**
@@ -298,11 +406,17 @@ export class Nip46Signer implements NostrSigner {
    *
    * Failing the in-flight requests is the point: closing the transport under a
    * pending `signEvent` and leaving its promise alone recreates the hang the
-   * deadlines exist to remove, only sooner.
+   * deadlines exist to remove, only sooner. The timers go too — a heartbeat or a
+   * scheme probe that outlives its connection would publish on a channel nobody is
+   * listening to, and in a test run would hold the process open.
    */
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.keepAliveTimer !== undefined) clearTimeout(this.keepAliveTimer);
+    this.keepAliveTimer = undefined;
+    for (const timer of this.probeTimers) clearTimeout(timer);
+    this.probeTimers.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.pending.failAll("the remote signer connection was closed");
@@ -318,6 +432,7 @@ export class Nip46Signer implements NostrSigner {
       },
       (event) => this.onEvent(event),
     );
+    this.scheduleKeepAlive();
   }
 
   private onEvent(event: NostrEvent): void {
@@ -325,19 +440,28 @@ export class Nip46Signer implements NostrSigner {
     if (this.seen.has(event.id)) return;
     if (this.seen.size > 256) this.seen.clear();
     this.seen.add(event.id);
-    void this.client
-      .nip44Decrypt(event.pubkey, event.content)
-      .then((payload) => {
-        const response = parseResponse(payload);
+    void this.codec
+      .decrypt(event.pubkey, event.content)
+      .then((frame) => {
+        // A frame that decrypted under the conversation key with this pubkey came
+        // from the holder of that key, so for our signer it is proof of two things
+        // at once: the connection is alive, and this is the encryption it speaks.
+        if (event.pubkey === this.options.remoteSignerPubkey) {
+          this.peerScheme = frame.scheme;
+          this.lastHeardAt = Date.now();
+          this.markAlive();
+        }
+        const response = parseResponse(frame.payload);
         // Not a response: a signer may also send us *requests* (it is a NIP-46 peer
         // too). Setu does not service those, and dropping one must not disturb the
         // requests that are waiting.
         if (response) this.pending.deliver(event.pubkey, response);
       })
       .catch(() => {
-        // Undecryptable means it was not for this conversation. Anyone can publish a
-        // kind-24133 addressed to our client key; the conversation key is what makes
-        // that harmless, so there is nothing here worth reporting.
+        // Undecryptable under either scheme means it was not for this conversation.
+        // Anyone can publish a kind-24133 addressed to our client key; the
+        // conversation key is what makes that harmless, so there is nothing here
+        // worth reporting.
       });
   }
 
@@ -352,173 +476,147 @@ export class Nip46Signer implements NostrSigner {
     this.ensureSubscribed();
     const id = newRequestId();
     const remote = this.options.remoteSignerPubkey;
+    const known = this.peerScheme;
+    const deadline =
+      this.state === "unreachable"
+        ? Math.min(timeoutMs, UNREACHABLE_TIMEOUT_MS)
+        : timeoutMs;
     // Registered before the event is published, not after: with two relays and a
     // fast signer the reply can arrive while `publish` is still awaiting, and a
     // reply with nothing waiting for it is dropped.
-    const answer = this.pending.open(id, method, remote, timeoutMs);
+    const answer = this.pending.open(id, method, remote, deadline);
+    const payload = encodeRequest({ id, method, params });
     try {
-      const content = await this.client.nip44Encrypt(
-        remote,
-        encodeRequest({ id, method, params }),
-      );
-      const event = await this.client.signEvent({
-        kind: NIP46_KIND,
-        content,
-        tags: [["p", remote]],
-        created_at: this.now(),
-      });
-      await this.options.transport.publish(event, this.options.relays);
+      await this.publishAs(remote, payload, known ?? "nip44");
+      // Only where there is no evidence yet, and only if the probe can still fire
+      // inside this request's deadline — a copy sent after the request has already
+      // given up is a request nobody is waiting for.
+      if (known === undefined && this.probeMs < deadline) {
+        this.probeNip04(payload);
+      }
     } catch (cause) {
       this.pending.fail(
         id,
         cause instanceof Error ? cause.message : "could not be sent",
       );
     }
-    return answer;
+    try {
+      return await answer;
+    } catch (cause) {
+      // Re-worded only when the heartbeat has already established that the signer
+      // is gone. "did not answer within 5s" is true but reads as a slow signer;
+      // what the user needs to be told is that the connection needs re-making.
+      if (this.state === "unreachable") {
+        throw new SignerError(
+          `the remote signer has stopped answering and needs to be reconnected (${method})`,
+          cause,
+        );
+      }
+      throw cause;
+    }
   }
-}
 
-export interface NostrConnectOptions {
-  readonly transport: Nip46Transport;
-  readonly clientSecret: Uint8Array;
-  readonly relays: readonly string[];
-  readonly secret?: string;
-  readonly perms?: readonly string[];
-  readonly metadata?: {
-    readonly name?: string;
-    readonly url?: string;
-    readonly image?: string;
-  };
-  readonly timeoutMs?: number;
-  readonly handshakeTimeoutMs?: number;
-  readonly onAuthChallenge?: (url: string, method: string) => void;
-  readonly now?: () => number;
-}
+  private async publishAs(
+    remote: Hex32,
+    payload: string,
+    scheme: Nip46Scheme,
+  ): Promise<void> {
+    const content = await this.codec.encrypt(remote, payload, scheme);
+    const event = await this.client.signEvent({
+      kind: NIP46_KIND,
+      content,
+      tags: [["p", remote]],
+      created_at: this.now(),
+    });
+    await this.options.transport.publish(event, this.options.relays);
+  }
 
-/** A `nostrconnect://` handshake in progress. */
-export interface NostrConnectHandshake {
-  /** Show this to the user as a QR code or a copyable string. */
-  readonly uri: string;
-  readonly clientPubkey: Hex32;
-  /** Resolves once a signer proves itself by echoing the secret. */
-  readonly signer: Promise<Nip46Signer>;
-  /** Give up: stops listening and rejects `signer`. */
-  cancel(): void;
-}
+  /**
+   * Re-send one request in NIP-04 if the NIP-44 copy landed nowhere.
+   *
+   * The only way to discover that a peer speaks NIP-04 is to be understood by it: a
+   * signer that cannot decrypt a request cannot reply to say it could not, so silence
+   * is the entire signal. `peerScheme` is the guard, and any decryptable frame from
+   * the signer sets it — including an `auth_url`, which is a signer saying "I read
+   * this and I am asking the user". So a dual-capable signer that acknowledges the
+   * request in any way never receives a second copy.
+   *
+   * ## The case this deliberately accepts
+   *
+   * A signer that reads *both* schemes, prompts locally, and sends nothing while it
+   * waits will pass {@link SCHEME_PROBE_MS} in silence and get the NIP-04 copy, which
+   * it can also read — so the user may see a second approval prompt for one action.
+   * That is the accepted cost of making legacy signers work at all, and it is bounded:
+   * both copies carry the *same* request id, so a second approval cannot produce a
+   * second signature in the app. `rpc.ts` deletes the entry when the first answer
+   * lands and drops the duplicate.
+   */
+  private probeNip04(payload: string): void {
+    const timer = background(() => {
+      this.probeTimers.delete(timer);
+      if (this.closed || this.peerScheme !== undefined) return;
+      void this.publishAs(
+        this.options.remoteSignerPubkey,
+        payload,
+        "nip04",
+      ).catch(() => {
+        // The NIP-44 copy owns the deadline; a failed probe only means the legacy
+        // path is unavailable too, which the deadline will report soon enough.
+      });
+    }, this.probeMs);
+    this.probeTimers.add(timer);
+  }
 
-/**
- * Start the direction where *we* issue the invitation.
- *
- * The signer proves itself by echoing our secret. That echo is the whole
- * authentication step: the URI is published to a relay and to a screen, so anyone may
- * see the client key, and without the secret check the first party to answer would
- * become the account's signer. Which is why the secret must come from a CSPRNG and
- * why a mismatched echo is ignored rather than treated as a near miss.
- */
-export function startNostrConnect(
-  options: NostrConnectOptions,
-): NostrConnectHandshake {
-  const client = LocalSigner.fromSecretKey(options.clientSecret);
-  const clientPubkey = client.pubkeySync();
-  const secret = options.secret ?? generateConnectSecret();
-  const now = options.now ?? (() => Math.floor(Date.now() / 1000));
-  const perms = options.perms ?? DEFAULT_PERMISSIONS;
-  const uri = buildNostrConnectUri({
-    clientPubkey,
-    relays: options.relays,
-    secret,
-    perms,
-    ...(options.metadata ?? {}),
-  });
+  private scheduleKeepAlive(): void {
+    const interval = this.options.keepAliveMs;
+    if (interval === undefined || interval <= 0) return;
+    if (this.closed || this.keepAliveTimer !== undefined) return;
+    this.keepAliveTimer = background(() => {
+      this.keepAliveTimer = undefined;
+      void this.heartbeat().finally(() => this.scheduleKeepAlive());
+    }, interval);
+  }
 
-  let settled = false;
-  let stop: Nip46Unsubscribe | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  // Assigned inside the executor below. Cancelling has to *reject* the promise, not
-  // merely stop listening: a cancel that only unsubscribed would leave the caller
-  // awaiting a handshake nothing can complete — the same permanent spinner the
-  // deadlines exist to prevent, arrived at by pressing "cancel".
-  let cancelHandshake: () => void = () => {};
+  /**
+   * One idle check.
+   *
+   * Skipped entirely while the connection is in use, because a request that is being
+   * answered is better evidence than a ping and a ping racing a `sign_event` costs
+   * the user latency on the one call where they are watching. Liveness is judged on
+   * "did anything at all arrive", not on whether `ping` succeeded: a signer old
+   * enough to lack `ping` answers `{"error":"unknown method"}`, and an error from the
+   * signer is proof of life just as much as a `pong` is.
+   */
+  private async heartbeat(): Promise<void> {
+    if (this.closed) return;
+    const interval = this.options.keepAliveMs ?? 0;
+    if (Date.now() - this.lastHeardAt < interval) return;
+    const before = this.lastHeardAt;
+    await this.request(
+      "ping",
+      [],
+      Math.min(this.timeoutMs, KEEPALIVE_PING_TIMEOUT_MS),
+    ).catch(() => {
+      // Handled below by whether anything was heard, not by the rejection.
+    });
+    if (this.lastHeardAt > before) {
+      this.markAlive();
+      return;
+    }
+    this.misses += 1;
+    if (this.misses >= KEEPALIVE_MISSES) this.markUnreachable();
+  }
 
-  const signer = new Promise<Nip46Signer>((resolve, reject) => {
-    const finish = (run: () => void): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== undefined) clearTimeout(timer);
-      stop?.();
-      stop = undefined;
-      run();
-    };
+  private markAlive(): void {
+    this.misses = 0;
+    if (this.state === "alive") return;
+    this.state = "alive";
+    this.options.onHealth?.("alive");
+  }
 
-    timer = setTimeout(
-      () =>
-        finish(() =>
-          reject(
-            new SignerError(
-              "no remote signer answered this connection request in time",
-            ),
-          ),
-        ),
-      options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,
-    );
-
-    cancelHandshake = () =>
-      finish(() =>
-        reject(new SignerError("the connection request was cancelled")),
-      );
-
-    stop = options.transport.subscribe(
-      {
-        relays: options.relays,
-        clientPubkey,
-        since: now() - SUBSCRIBE_SKEW_SECONDS,
-      },
-      (event) => {
-        if (settled || event.kind !== NIP46_KIND) return;
-        void client
-          .nip44Decrypt(event.pubkey, event.content)
-          .then((payload) => {
-            const response = parseResponse(payload);
-            if (!response || response.result !== secret) return;
-            const remoteSignerPubkey = event.pubkey;
-            finish(() => {
-              // A fresh signer with its own subscription rather than handing this
-              // one over: the handshake listener has no request table behind it, and
-              // the signer's first act is to subscribe before it sends anything.
-              const built = new Nip46Signer({
-                transport: options.transport,
-                clientSecret: options.clientSecret,
-                remoteSignerPubkey,
-                relays: options.relays,
-                ...(options.timeoutMs !== undefined
-                  ? { timeoutMs: options.timeoutMs }
-                  : {}),
-                ...(options.onAuthChallenge
-                  ? { onAuthChallenge: options.onAuthChallenge }
-                  : {}),
-                ...(options.now ? { now: options.now } : {}),
-              });
-              built.pubkey().then(
-                () => resolve(built),
-                (cause: unknown) => {
-                  built.close();
-                  reject(
-                    cause instanceof Error
-                      ? cause
-                      : new SignerError(
-                          "the remote signer did not identify itself",
-                        ),
-                  );
-                },
-              );
-            });
-          })
-          .catch(() => {
-            // Not for us. See `Nip46Signer.onEvent`.
-          });
-      },
-    );
-  });
-
-  return { uri, clientPubkey, signer, cancel: () => cancelHandshake() };
+  private markUnreachable(): void {
+    if (this.state === "unreachable") return;
+    this.state = "unreachable";
+    this.options.onHealth?.("unreachable");
+  }
 }

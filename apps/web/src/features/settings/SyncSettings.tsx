@@ -25,6 +25,7 @@ import {
   type SyncReadability,
   useEffectiveSettings,
 } from "../sync/useSettingsSync";
+import { PowDifficultyField } from "./PowDifficultyField";
 import { SaveRow } from "./settingsShared";
 
 /**
@@ -54,6 +55,7 @@ const SETTING_LABELS: Record<SettingKey, string> = {
   homeFeed: "Home feed",
   trendingWindowSeconds: "Talked-about window",
   mediaHost: "Media host",
+  powDifficulty: "Proof of work",
 };
 
 function describeValue(key: SettingKey, settings: SyncedSettings): string {
@@ -87,6 +89,12 @@ function describeValue(key: SettingKey, settings: SyncedSettings): string {
       } catch {
         return settings.mediaHost;
       }
+    // "bits" is carried into the summary because the number alone is ambiguous:
+    // NIP-13 counts leading zero bits and 20 hex characters would be 80 of them.
+    case "powDifficulty":
+      return settings.powDifficulty > 0
+        ? `${settings.powDifficulty} bits`
+        : "off";
   }
 }
 
@@ -110,6 +118,7 @@ export function SyncSection() {
         <StatusLine sync={sync} />
         <SyncedList sync={sync} />
         <MediaHostField />
+        <PowDifficultyField />
 
         <p className="text-2xs text-muted-foreground">
           Never included: your keys, an encrypted key, a remote-signer
@@ -293,19 +302,20 @@ function SyncedList({ sync }: { sync: SettingsSync }) {
         </li>
       ))}
       {/* Said explicitly because this panel deliberately does not duplicate the
-          controls: appearance is changed above, the other two where they are used.
-          A second copy of a control is a second thing to disagree with the first. */}
+          controls: appearance is changed above, the feed and window where they are
+          used, and the last two here. A second copy of a control is a second thing
+          to disagree with the first. */}
       <li className="pt-1 text-2xs text-muted-foreground">
         Appearance is set above, the home feed from the picker on Home, and the
-        window from the picker in Discover. This panel publishes whatever they
-        currently are.
+        window from the picker in Discover. The media host and proof of work are
+        set below. This panel publishes whatever they currently are.
       </li>
     </ul>
   );
 }
 
 /**
- * The one setting this panel owns.
+ * One of the two settings this panel owns (the other is `PowDifficultyField`).
  *
  * Applied on blur rather than per keystroke: every intermediate value of a URL
  * being typed is a different host, and a partially typed one is where the next

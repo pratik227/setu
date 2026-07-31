@@ -265,6 +265,13 @@ export function EngineProvider({
         retention: defaultRetentionPolicy(
           accountPubkey ? { accountPubkey } : {},
         ),
+        // Quota-driven retention: how full storage is decides how far back a sweep
+        // reaches. Optional chaining because `navigator.storage` is absent in some
+        // browsers and blocked in some private modes — both mean "unmeasurable",
+        // which keeps the age-only behaviour rather than guessing.
+        ...(typeof navigator !== "undefined" && navigator.storage
+          ? { storageManager: navigator.storage }
+          : {}),
         onError: (error) => report("store:maintenance", error),
       }),
     [store, accountPubkey, report],

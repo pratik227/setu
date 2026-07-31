@@ -19,6 +19,15 @@
  * The `bunker://` URI's `secret` is treated as more sensitive still: used once, during
  * the handshake, and not returned from this module at all. Errors quote the URI only
  * through `redactBunkerUri`.
+ *
+ * ## Every connection made here is kept alive
+ *
+ * {@link KEEPALIVE_MS} is passed to every signer this module builds, and that decision
+ * belongs here rather than in `@setu/protocol`: the protocol package has no idea
+ * whether it is running behind a browser tab with idle WebSockets or inside a one-shot
+ * script, and starting a repeating timer on a caller that cannot stop it would be the
+ * wrong default. A browser session is the case that needs it — a bunker connection is
+ * idle for most of its life, and an idle relay socket is closed by the relay.
  */
 
 import {
@@ -44,6 +53,24 @@ export const DEFAULT_INVITE_RELAYS = [
   "wss://offchain.pub",
 ] as const;
 
+/**
+ * How long a bunker connection may go unproven before Setu pings it.
+ *
+ * Under the idle timeout of the relays bunkers are usually reachable on, which cluster
+ * around a few minutes, so the socket is in use again before anyone closes it. The
+ * value is a compromise the other way too: every ping is a signed event on a relay, and
+ * a client that pinged every ten seconds would be a client relay operators rate-limit.
+ */
+const KEEPALIVE_MS = 60_000;
+
+/**
+ * Whether the signer is answering.
+ *
+ * Read off the signer rather than re-declared, because `@setu/protocol`'s root barrel
+ * does not export the union by name and a second hand-written copy of it would drift.
+ */
+export type RemoteHealth = Nip46Signer["health"];
+
 /** A live remote-signer connection and everything needed to persist it. */
 export interface RemoteConnection {
   readonly signer: Nip46Signer;
@@ -55,6 +82,16 @@ export interface RemoteConnection {
   readonly relays: readonly string[];
   /** The account, as the signer stated it. Never taken from the URI. */
   readonly userPubkey: Hex32;
+  /**
+   * Whether the keep-alive currently believes the signer is there.
+   *
+   * A function rather than a value because it changes underneath the holder: a
+   * connection object captured at sign-in would otherwise report the health of the
+   * moment it was created for the rest of the session. Worth surfacing in the UI as a
+   * "reconnect your signer" affordance — until then, the signer itself is what keeps a
+   * dead connection from costing the user a full request deadline per attempt.
+   */
+  health(): RemoteHealth;
   close(): void;
 }
 
@@ -70,6 +107,7 @@ function pair(
     remoteSignerPubkey: signer.remoteSignerPubkey,
     relays: signer.relays,
     userPubkey,
+    health: () => signer.health,
     close: () => {
       signer.close();
       transport.close();
@@ -87,6 +125,7 @@ function pair(
 export async function connectToBunker(
   uri: string,
   onError: (message: string) => void = () => {},
+  onHealth: (health: RemoteHealth) => void = () => {},
 ): Promise<RemoteConnection> {
   const parsed = parseBunkerUri(uri);
   if (!parsed) {
@@ -102,6 +141,8 @@ export async function connectToBunker(
       clientSecret,
       remoteSignerPubkey: parsed.remoteSignerPubkey,
       relays: parsed.relays,
+      keepAliveMs: KEEPALIVE_MS,
+      onHealth,
       ...(parsed.secret ? { secret: parsed.secret } : {}),
       onAuthChallenge: (url) =>
         onError(`the remote signer wants approval: ${url}`),
@@ -134,6 +175,7 @@ export interface ResumeBunkerInput {
 export async function resumeBunker(
   input: ResumeBunkerInput,
   onError: (message: string) => void = () => {},
+  onHealth: (health: RemoteHealth) => void = () => {},
 ): Promise<RemoteConnection> {
   const transport = new BunkerTransport(onError);
   try {
@@ -143,6 +185,8 @@ export async function resumeBunker(
       remoteSignerPubkey: input.remoteSignerPubkey,
       relays: input.relays,
       userPubkey: input.userPubkey,
+      keepAliveMs: KEEPALIVE_MS,
+      onHealth,
       onAuthChallenge: (url) =>
         onError(`the remote signer wants approval: ${url}`),
     });
@@ -171,6 +215,7 @@ export interface RemoteInvite {
 export function inviteRemoteSigner(
   relays: readonly string[] = DEFAULT_INVITE_RELAYS,
   onError: (message: string) => void = () => {},
+  onHealth: (health: RemoteHealth) => void = () => {},
 ): RemoteInvite {
   const clientSecret = generateSecretKey();
   const transport = new BunkerTransport(onError);
@@ -179,6 +224,8 @@ export function inviteRemoteSigner(
     clientSecret,
     relays,
     metadata: { name: "Setu" },
+    keepAliveMs: KEEPALIVE_MS,
+    onHealth,
     onAuthChallenge: (url) =>
       onError(`the remote signer wants approval: ${url}`),
   });

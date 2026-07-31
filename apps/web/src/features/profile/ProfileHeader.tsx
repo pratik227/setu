@@ -34,6 +34,7 @@ import { useRenderedContent } from "../notes/NoteContent";
 import { nip05DisplayName } from "../profiles/nip05";
 import type { ProfileDetails } from "../profiles/profileContent";
 import { useNip05 } from "../profiles/useNip05";
+import { useUserStatus } from "../profiles/useUserStatus";
 import type { AuthorCounts } from "./useAuthorCounts";
 import { useAuthorFollowing } from "./useAuthorFollowing";
 import type { LocalAuthorCounts } from "./useLocalCounts";
@@ -69,6 +70,21 @@ function CopyNpubButton({ npub }: { npub: string }) {
       {truncateNpub(npub, 10)}
     </Button>
   );
+}
+
+/**
+ * The host of a status link, for the anchor's own text.
+ *
+ * Already validated as `http(s):` by `parseUserStatus`, so this cannot throw on
+ * anything that reaches it — the fallback exists so a future caller passing an
+ * unvalidated string gets a harmless string rather than a render crash.
+ */
+function linkHost(href: string): string {
+  try {
+    return new URL(href).hostname;
+  } catch {
+    return href;
+  }
 }
 
 /**
@@ -206,6 +222,7 @@ export function ProfileHeader({
   const muted = rules.pubkeys.has(pubkey);
   const npub = encodeNpub(pubkey);
   const nip05Status = useNip05(pubkey, details.nip05);
+  const status = useUserStatus(pubkey);
   const verified = nip05Status === "verified";
 
   // Rough threshold on characters rather than measuring rendered lines: a
@@ -365,6 +382,48 @@ export function ProfileHeader({
               }
             >
               {nip05DisplayName(details.nip05)}
+            </p>
+          ) : null}
+
+          {/*
+           * The status line (NIP-38), above the bio.
+           *
+           * Above because it is the more current of the two: a bio is written once and
+           * a status is about right now. It is also the reason the row is quiet rather
+           * than emphasised — an author who set a status an hour ago did not ask for it
+           * to outrank their name.
+           *
+           * A status that carried an expiry disappears on its own; nothing here has to
+           * decide when a line has gone stale, because the author already did.
+           */}
+          {status ? (
+            <p className="mt-1.5 flex min-w-0 items-baseline gap-1.5 text-xs">
+              <span aria-hidden className="shrink-0">
+                {status.kind === "music" ? "♫" : "•"}
+              </span>
+              <span className="min-w-0 break-words text-foreground/90">
+                {status.content}
+                {status.link ? (
+                  <>
+                    {" "}
+                    <a
+                      href={status.link}
+                      target="_blank"
+                      // `noreferrer` as well as `noopener`: the link is a URL from a
+                      // stranger, and it has no business learning which profile the
+                      // reader was on.
+                      rel="noopener noreferrer"
+                      className="underline hover:no-underline"
+                    >
+                      {/* The host, not the word "link". It says where the click
+                          goes before it is made, and it is the difference between a
+                          screen reader announcing "link, link" and naming a
+                          destination. */}
+                      {linkHost(status.link)}
+                    </a>
+                  </>
+                ) : null}
+              </span>
             </p>
           ) : null}
 

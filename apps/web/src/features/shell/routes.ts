@@ -16,6 +16,8 @@ export type Route =
   | { readonly name: "notifications" }
   | { readonly name: "mentions" }
   | { readonly name: "bookmarks" }
+  | { readonly name: "wallet" }
+  | { readonly name: "about" }
   | { readonly name: "hashtag"; readonly tag: string }
   | { readonly name: "profile"; readonly pubkey: string }
   | { readonly name: "settings" };
@@ -29,6 +31,8 @@ export const ROUTE_TITLES: Record<Route["name"], string> = {
   notifications: "Notifications",
   mentions: "Mentions",
   bookmarks: "Bookmarks",
+  wallet: "Wallet",
+  about: "About Setu",
   hashtag: "Hashtag",
   profile: "Profile",
   settings: "Settings",

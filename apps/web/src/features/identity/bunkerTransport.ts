@@ -23,6 +23,10 @@
  * answer is delivered into a subscription that no longer exists, so signing fails on
  * a deadline that reports "the signer did not answer" about a signer that did. Every
  * live REQ is therefore replayed on each open.
+ *
+ * A relay can also end a subscription *without* closing the socket, by answering
+ * `CLOSED`. That produces the same broken state and the reconnect path never runs,
+ * because nothing looks broken from here — see {@link BunkerTransport.reopen}.
  */
 
 import {
@@ -223,6 +227,38 @@ export class BunkerTransport implements Nip46Transport {
     return connection;
   }
 
+  /**
+   * Drop a socket whose subscription the relay killed while still holding it open.
+   *
+   * `CLOSED` is the one failure the reconnect logic could not see. The replay in
+   * `onopen` fixes a socket that *died*, but a relay that ends a REQ and keeps the
+   * connection up leaves this transport with a socket it believes is fine and a
+   * subscription that no longer exists on the other side — after which `publish` still
+   * succeeds, the signer's reply is delivered into nothing, and signing fails on a
+   * deadline that blames the signer. Closing the socket puts the connection back on
+   * the path that already works: the next use reopens it and re-issues every live REQ.
+   *
+   * Bounded by that "next use", deliberately. A relay that closes every subscription
+   * it is offered gets one reconnect per request rather than a retry loop, and with the
+   * keep-alive running that means one a minute at worst.
+   */
+  private reopen(relay: string, subscriptionId: string): void {
+    if (this.closed) return;
+    // Ignored for a subscription we have already dropped ourselves: a `CLOSED`
+    // crossing our own `CLOSE` on the wire is normal and means nothing is wrong.
+    if (!this.subscriptions.has(subscriptionId)) return;
+    const connection = this.connections.get(relay);
+    if (!connection) return;
+    this.connections.delete(relay);
+    connection.open = false;
+    for (const waiter of connection.waiters.splice(0)) waiter(false);
+    try {
+      connection.socket.close();
+    } catch {
+      // Already gone, which is the state we were asking for.
+    }
+  }
+
   private onFrame(relay: string, data: unknown): void {
     if (typeof data !== "string") return;
     let frame: unknown;
@@ -243,6 +279,7 @@ export class BunkerTransport implements Nip46Transport {
       this.onError(
         `nip46 relay ${relay} closed the subscription: ${String(frame[2])}`,
       );
+      this.reopen(relay, String(frame[1]));
       return;
     }
     if (frame[0] !== "EVENT") return;

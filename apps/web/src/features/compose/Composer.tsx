@@ -22,6 +22,7 @@ import { buildNote } from "./buildNote";
 import { EmojiPicker } from "./EmojiPicker";
 import { insertAt } from "./emoji";
 import { imetaTag, type UploadedMedia } from "./nip96";
+import { describePow, miningLabel } from "./pow";
 import { usePublish } from "./usePublish";
 import { ACCEPTED_MEDIA, hostLabel, useUpload } from "./useUpload";
 
@@ -54,7 +55,7 @@ export function Composer({
   className,
 }: ComposerProps) {
   const { session } = useSession();
-  const { state, publish } = usePublish();
+  const { state, publish, skipMining } = usePublish();
   const [content, setContent] = useState("");
   const [warning, setWarning] = useState<string | undefined>();
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -206,6 +207,15 @@ export function Composer({
   }
 
   const remaining = SOFT_LIMIT - content.length;
+  /*
+   * What happened to the proof of work, if any was asked for.
+   *
+   * Rendered next to "sent" rather than instead of it, and never omitted when the
+   * work did not make it in: publishing without it is defensible because almost
+   * every relay accepts it, but a note the user believes carries difficulty 20 when
+   * its id has none is a claim they would have to be told about by a relay.
+   */
+  const powNote = state.status === "sent" ? describePow(state.pow) : undefined;
 
   return (
     <div className={cn("border-b border-border/50 px-4 py-3", className)}>
@@ -285,11 +295,34 @@ export function Composer({
             <p className="mt-1 text-xs text-destructive">{state.error}</p>
           ) : null}
 
+          {/* Mining, with a way out. A spinner alone is indistinguishable from a
+              hung tab at difficulty 24, so the line carries hashes and how much of
+              the budget is left, and the button says what pressing it does — the
+              note goes out, without the work. */}
+          {state.status === "signing" && state.mining ? (
+            <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+              <span className="flex-1 tabular-nums">
+                {miningLabel(state.mining)}
+              </span>
+              <button
+                type="button"
+                onClick={skipMining}
+                className="shrink-0 underline hover:no-underline"
+              >
+                Post without it
+              </button>
+            </p>
+          ) : null}
+
           {state.status === "sent" ? (
             <p className="mt-1 text-xs text-muted-foreground">
               Sent to {state.results.filter((r) => r.ok).length} of{" "}
               {state.results.length} relays.
             </p>
+          ) : null}
+          {powNote ? (
+            <p className="mt-1 text-2xs text-muted-foreground">{powNote}</p>
           ) : null}
 
           {upload.state.status === "uploading" ? (

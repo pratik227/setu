@@ -117,7 +117,22 @@ export function ContentSurface({
       data-setu-content-surface=""
       className={cn(
         "flex min-w-0 flex-1 flex-col overflow-hidden bg-background",
-        "border-x border-border",
+        /*
+         * No vertical borders at all. Both seams belong to the neighbours.
+         *
+         * This element used to carry `border-x`, which doubled *both* dividers: the
+         * left edge sat against `[data-setu-sidebar-edge]`'s `border-right` (in
+         * `tokens.css`) and the right edge sat against `AuxiliaryPanel`'s `border-l`.
+         * Two adjacent 1px rules do not read as a wider line, they read as a *darker*
+         * one — a seam that looks like a rendering fault rather than a divider.
+         *
+         * The rule for the shell is that every vertical boundary is drawn by exactly
+         * one element, and for both of these the neighbour is the better owner: the
+         * sidebar's edge has to stay paired with its own chrome fill (it goes
+         * transparent with it in gradient mode), and the panel's edge only exists when
+         * the panel does. Leaving the surface bare means no boundary can be drawn twice
+         * no matter which neighbours are mounted.
+         */
         className,
       )}
       {...props}

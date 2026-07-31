@@ -39,10 +39,17 @@ import type { ThemeMode } from "@setu/ui";
  * record. This document is published to relays; it is encrypted, but "encrypted
  * with the key we would be leaking" is not a security argument, and a copy of your
  * key on every relay you write to is a permanent compromise that no later fix can
- * recall. The type below is a closed record of six scalars, which is the enforcement:
- * the only path from local state into the document is `SyncedSettings`, so there is
- * nowhere for a secret to be added by accident. If you are about to widen it, that
- * is the moment to stop.
+ * recall. The type below is a closed record of seven scalars, which is the
+ * enforcement: the only path from local state into the document is `SyncedSettings`,
+ * so there is nowhere for a secret to be added by accident. If you are about to
+ * widen it, that is the moment to stop.
+ *
+ * `powDifficulty` was the last thing added, and it is the shape of addition this
+ * list can take: a small integer describing a preference, useless to anyone who
+ * intercepts it, meaningful on every device the account signs in on. What the rule
+ * forbids is not growth, it is carrying anything that could act on the user's
+ * behalf, or anything large or fast-moving enough that saving it would mean
+ * broadcasting a signed event on a timer.
  *
  * Nor drafts, read marks, or anything else large or fast-moving. This is a
  * preferences document, and every save is a signed event broadcast to every write
@@ -52,8 +59,16 @@ import type { ThemeMode } from "@setu/ui";
 /** The document's address. One `d` tag, forever — see `nip78.ts`. */
 export const SETTINGS_IDENTIFIER = "setu/settings";
 
-/** Schema version of the fields this build understands. */
-export const SETTINGS_VERSION = 1;
+/**
+ * Schema version of the fields this build understands.
+ *
+ * 2 added `powDifficulty`. Bumped rather than smuggled in, per rule 4: a v1
+ * document simply has no such key and reads as the default (off), and a v1 build
+ * handed a v2 document carries the key through as an unknown and keeps the higher
+ * version number — so nobody's difficulty is deleted by an older device saving a
+ * theme change.
+ */
+export const SETTINGS_VERSION = 2;
 
 /**
  * The media host uploads go to.
@@ -64,6 +79,19 @@ export const SETTINGS_VERSION = 1;
  * forever.
  */
 export const DEFAULT_MEDIA_HOST = "https://nostr.build";
+
+/**
+ * Proof of work required of every event this client publishes, in leading zero
+ * *bits* of the id (NIP-13).
+ *
+ * **Off by default**, and that is a considered position rather than caution: mining
+ * spends real time on the poster's device before every note, and the overwhelming
+ * majority of relays do not ask for any. Defaulting it on would make Setu slower
+ * than every alternative at the one thing it does most, to satisfy a requirement
+ * almost nobody has — and someone who does have it will be told so by the relay
+ * that rejected them, which is the moment this setting becomes findable.
+ */
+export const DEFAULT_POW_DIFFICULTY = 0;
 
 /**
  * Every synced setting, flat, and the exact set of keys this build owns.
@@ -83,6 +111,17 @@ export interface SyncedSettings {
   /** "Talked about" window, in seconds. */
   readonly trendingWindowSeconds: number;
   readonly mediaHost: string;
+  /**
+   * NIP-13 difficulty in leading zero *bits*, or 0 for off.
+   *
+   * Bits, not hex characters — the two differ by a factor of four and confusing
+   * them means advertising a quarter of the work that was done. Held with no upper
+   * bound for the same forward-compatibility reason `themeId` is a plain string: a
+   * build that can mine more than this one must be able to round-trip its value
+   * through here unchanged. The ceiling on what is actually *attempted* belongs at
+   * the point of use, not in the document.
+   */
+  readonly powDifficulty: number;
 }
 
 export type SettingKey = keyof SyncedSettings;
@@ -95,6 +134,7 @@ export const SETTING_KEYS = [
   "homeFeed",
   "trendingWindowSeconds",
   "mediaHost",
+  "powDifficulty",
 ] as const satisfies readonly SettingKey[];
 
 const THEME_MODES: readonly ThemeMode[] = ["light", "dark", "system"];
@@ -117,6 +157,7 @@ export const DEFAULT_SETTINGS: SyncedSettings = {
   // 12 hours: the option Discover starts on.
   trendingWindowSeconds: 12 * 60 * 60,
   mediaHost: DEFAULT_MEDIA_HOST,
+  powDifficulty: DEFAULT_POW_DIFFICULTY,
 };
 
 /** A parsed document: the settings it carries, its version, and the rest of it. */
@@ -178,6 +219,17 @@ export function splitSettingsFields(
           ? fields.trendingWindowSeconds
           : fallback.trendingWindowSeconds,
       mediaHost: string("mediaHost", fallback.mediaHost),
+      // Integer and non-negative, with no upper bound. A fractional difficulty is
+      // not a number of bits, and a negative one would read as "off" here while
+      // round-tripping as a value no picker can show; both fall back rather than
+      // being coerced, because coercing 20.5 to 20 or 21 is choosing a cost the
+      // user did not ask for — difficulty doubles per bit.
+      powDifficulty:
+        typeof fields.powDifficulty === "number" &&
+        Number.isInteger(fields.powDifficulty) &&
+        fields.powDifficulty >= 0
+          ? fields.powDifficulty
+          : fallback.powDifficulty,
     },
   };
 }
