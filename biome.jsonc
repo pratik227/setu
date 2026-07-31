@@ -10,11 +10,20 @@
     // question and deleted afterwards. Holding a throwaway to the house style
     // gates the build on a file nobody will read again; a probe that has earned
     // a permanent place gets a real name, and with it the checks.
+    //
+    // The two `src-tauri` directories are machine-written and neither is
+    // committed: Cargo's build cache alone drops several hundred JSON
+    // fingerprint files under `target/`, and Tauri's build script regenerates
+    // the capability schemas under `gen/`. Without these two lines a single
+    // `cargo build` turns `biome check .` into hundreds of formatting errors in
+    // files no human will ever open.
     "includes": [
       "**",
       "!**/dist",
       "!**/node_modules",
       "!**/test-results",
+      "!apps/desktop/src-tauri/target",
+      "!apps/desktop/src-tauri/gen",
       "!**/*.gen.ts",
       "!**/.*.mjs",
       "!**/styles/index.css",

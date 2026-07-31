@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Grants the main window nothing. The desktop shell renders the same bundle as the browser build, and that bundle calls no Tauri command, so every permission listed here would be surface without a caller — including the `core:default` set that `tauri init` writes, which hands the webview window control, path, event, tray, menu and resource commands. This app holds a signing key and renders untrusted note content from arbitrary relays; a script that gets into the page must find no bridge waiting for it. Relay WebSockets, media fetches, NIP-05 lookups and NIP-96 uploads are all made by the webview itself and are governed by the CSP in tauri.conf.json, not by this file, so an empty list costs the app no functionality today. Add a single permission at a time, with the caller, when a real native feature (OS keychain, `nostr:` deep links, local notifications) lands. `remote` is deliberately absent: only the bundled frontend origin is in scope, so a remote page loaded into a webview inherits nothing.",
+  "windows": ["main"],
+  "permissions": []
+}

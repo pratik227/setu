@@ -176,6 +176,35 @@ export function seedLastSeen(pubkey: string, now: number): number {
   return now;
 }
 
+/**
+ * Forget an account's watermark, on sign-out.
+ *
+ * This key used to survive sign-out, and the result was the previous account's read
+ * position sitting on the device after everything else about them had been deleted.
+ * Two ways that goes wrong, and the second is the one that matters: the same account
+ * signing back in inherits a watermark from a session whose events are gone, so a
+ * timestamp says "seen" about notifications the store can no longer show — and on a
+ * shared computer the value itself is a residue, a decimal timestamp keyed by a
+ * stranger's pubkey saying when they last looked at their notifications.
+ *
+ * Removed rather than zeroed: zero is a *valid* watermark meaning "seen nothing", and
+ * writing it would mark a year of history unread. Absent is the state the first-run
+ * rule above is written for.
+ */
+export function clearNotificationsRead(pubkey: string | undefined): void {
+  if (!pubkey) return;
+  cache.delete(pubkey);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(lastSeenKey(pubkey));
+    }
+  } catch {
+    // Storage disabled or blocked by policy. Reported by the caller as data left
+    // behind; there is nothing further this function can do about it.
+  }
+  emit();
+}
+
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }

@@ -1,0 +1,47 @@
+# Rust crate for the Setu desktop shell.
+#
+# This crate is deliberately almost empty. The window it opens loads the exact
+# `apps/web/dist` output the browser build produces, so there is no second
+# frontend to keep in sync and nothing here to duplicate.
+
+[package]
+name = "setu-desktop"
+version = "0.0.0"
+description = "Setu desktop shell"
+license = "Apache-2.0"
+edition = "2021"
+# Not published: this crate only ever exists to be bundled into an app.
+publish = false
+
+# Standalone Cargo workspace. The repository root is a pnpm workspace with no
+# Cargo.toml, so without this an ancestor directory that happens to contain one
+# would silently adopt this crate and put `target/` somewhere .gitignore does not
+# cover.
+[workspace]
+
+# The lib/bin split is what `tauri android init` and `tauri ios init` expect:
+# mobile builds link the library and supply their own entry point, so `main.rs`
+# must stay a thin shim over `run()`. Collapsing this into one `main.rs` works
+# today and has to be undone the day mobile starts (it is on the plan).
+[lib]
+name = "setu_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# No Tauri plugins. Not `tauri-plugin-http`, `-shell`, `-fs`, `-dialog`, `-opener`
+# or `-process`: the webview does its own networking, and a plugin that is compiled
+# in is reachable from any script that gets into the page even before a capability
+# grants it a command. An app that holds a signing key should not carry a
+# filesystem or process-spawning bridge it has no caller for.
+tauri = { version = "2", features = [] }
+
+# Release profile is tuned for a shipped binary rather than for build time; a
+# desktop bundle is built rarely and downloaded often.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

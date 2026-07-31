@@ -74,6 +74,8 @@ export {
   toPubkey,
   truncateNpub,
 } from "./nip19";
+export type { EmojiSegment } from "./nip30";
+export { emojiSegments, emojiTagMap, isSoleShortcode } from "./nip30";
 export {
   buildAuthEvent,
   CLIENT_AUTH_KIND,
@@ -101,20 +103,87 @@ export {
   unwrap,
   wrap,
 } from "./nip59";
+export type { PicturePost } from "./nip68";
+export { parsePicture } from "./nip68";
+export type { VideoPost } from "./nip71";
+export { isVideoKind, parseVideo } from "./nip71";
+export type { ParsedAppData } from "./nip78";
+export {
+  APP_DATA_KIND,
+  APP_DATA_VERSION_KEY,
+  AppDataError,
+  appDataFilter,
+  appDataTemplate,
+  decryptAppData,
+  encryptAppData,
+  isAppData,
+  looksLikePlaintextJson,
+  parseAppDataJson,
+  replacesAppData,
+  serializeAppDataJson,
+} from "./nip78";
+export type {
+  Poll,
+  PollOption,
+  PollOptionTally,
+  PollResponse,
+  PollSource,
+  PollTally,
+  PollType,
+} from "./nip88";
+export {
+  buildPollResponse,
+  EMPTY_TALLY,
+  parsePoll,
+  parsePollResponse,
+  pollHasEnded,
+  tallyPoll,
+} from "./nip88";
 export type { ImetaEntry, MediaDimensions } from "./nip92";
 export { parseDim, parseImeta, parseImetaTag } from "./nip92";
-export type { Nip07Provider } from "./signers";
+export type {
+  BunkerUri,
+  Nip07Provider,
+  Nip46Request,
+  Nip46Response,
+  Nip46SignerOptions,
+  Nip46SubscribeParams,
+  Nip46Transport,
+  Nip46Unsubscribe,
+  NostrConnectHandshake,
+  NostrConnectOptions,
+  NostrConnectUri,
+  NostrConnectUriInput,
+} from "./signers";
 export {
+  AUTH_URL_RESULT,
+  buildNostrConnectUri,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_HANDSHAKE_TIMEOUT_MS,
+  DEFAULT_PERMISSIONS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  encodeRequest,
+  generateConnectSecret,
   generateSecretKey,
   getNip07Provider,
   getPublicKey,
+  isAuthChallenge,
+  isBunkerUri,
   isNip07Available,
   isReadonly,
   LocalSigner,
-  NIP46_STATUS,
+  NIP46_KIND,
   Nip07Signer,
+  Nip46Pending,
+  Nip46Signer,
+  newRequestId,
+  parseBunkerUri,
+  parseNostrConnectUri,
+  parseResponse,
   parseSecretKey,
   ReadonlySigner,
+  redactBunkerUri,
+  startNostrConnect,
 } from "./signers";
 export type { HasTags, ParsedAddress, ThreadRefs } from "./tags";
 export {

@@ -6,10 +6,30 @@ import {
   AvatarImage,
   Button,
   cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Skeleton,
 } from "@setu/ui";
-import { BadgeCheck, Check, Copy, Link2, Loader2, Zap } from "lucide-react";
+import {
+  BadgeCheck,
+  Check,
+  Copy,
+  Flag,
+  Link2,
+  Loader2,
+  MoreHorizontal,
+  Volume2,
+  VolumeX,
+  Zap,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { useSession } from "../identity/SessionProvider";
+import { MuteDialog } from "../moderation/MuteDialog";
+import { ReportDialog } from "../moderation/ReportDialog";
+import { useMuteRules } from "../moderation/useMuteList";
 import { useRenderedContent } from "../notes/NoteContent";
 import { nip05DisplayName } from "../profiles/nip05";
 import type { ProfileDetails } from "../profiles/profileContent";
@@ -101,12 +121,25 @@ export interface ProfileHeaderProps {
 }
 
 /**
- * Profile header: banner, identity, bio, keys, counts.
+ * Profile header: banner, identity, bio, keys, counts, moderation.
  *
  * The `about` text goes through the same tokenizer as a note body, so a bio's
  * links, hashtags and mentions behave exactly as they do in the timeline. Bios
  * are full of both, and rendering them as inert text is a small lie about what
  * the author wrote.
+ *
+ * ## Why mute and report live here and not only on a note
+ *
+ * A profile is where the decision is actually made. Somebody arrives here *because*
+ * a note bothered them, and until now the only way to act was to go back and find
+ * that note again — so the reader was asked to make an account-level judgement from
+ * the one surface that could not express one. It is also the only place the
+ * account-only report exists: `ReportDialog` with no `noteId` files the `["p", pk,
+ * type]` form, which is a claim about the account rather than about one note.
+ *
+ * Both are rendered as dialogs rather than fired from the menu, for the reasons those
+ * dialogs document: a mute is not a block and a report moderates nothing, and both
+ * sentences have to be read before the write, not after it.
  */
 export function ProfileHeader({
   pubkey,
@@ -138,6 +171,13 @@ export function ProfileHeader({
     ? `Highest figure reported by ${relayCounts.notes.answered} of ${relayCounts.notes.asked} relays that support counting. The true total may be higher.`
     : undefined;
   const [bioOpen, setBioOpen] = useState(false);
+  const [dialog, setDialog] = useState<"mute" | "report" | undefined>();
+  const { session } = useSession();
+  const { rules } = useMuteRules();
+  // Both items publish, so both need a signer. Absent rather than disabled on a
+  // read-only session: a greyed-out "Mute" invites a click that can only fail.
+  const canModerate = !isSelf && Boolean(session?.canSign);
+  const muted = rules.pubkeys.has(pubkey);
   const npub = encodeNpub(pubkey);
   const nip05Status = useNip05(pubkey, details.nip05);
   const verified = nip05Status === "verified";
@@ -194,34 +234,68 @@ export function ProfileHeader({
             </AvatarFallback>
           </Avatar>
 
-          {/* You cannot follow yourself, so the control is absent rather than
-              disabled — a greyed-out "Unfollow" on your own profile describes a
-              relationship that cannot exist. */}
-          {isSelf ? null : (
-            <Button
-              variant={following ? "outline" : "default"}
-              size="sm"
-              // Rendered but inert until the identity layer owns kind-3 writes. A
-              // follow write must merge into the newest list on the network, and a
-              // button built from a stale snapshot silently unfollows everyone
-              // added since — so the capability arrives with the code that can do
-              // it safely, not before.
-              disabled={!onToggleFollow || followBusy}
-              onClick={() => onToggleFollow?.(pubkey)}
-              title={
-                onToggleFollow
-                  ? undefined
-                  : "Following requires a signed-in account"
-              }
-            >
-              {followBusy ? <Loader2 className="animate-spin" /> : null}
-              {followBusy
-                ? "Checking your list"
-                : following
-                  ? "Unfollow"
-                  : "Follow"}
-            </Button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {canModerate ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    // `icon` is h-8, the same height as the `sm` follow button
+                    // beside it, so the two sit on one baseline.
+                    size="icon"
+                    aria-label={`More actions for ${displayName}`}
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {/* "Mute", not "Block". Nothing here stops this account reaching
+                      the reader; the dialog is where that gets said in full, which
+                      is why the item opens one instead of writing. */}
+                  <DropdownMenuItem onSelect={() => setDialog("mute")}>
+                    {muted ? <Volume2 /> : <VolumeX />}
+                    {muted ? "Unmute" : "Mute"} this account
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {/* Trailing ellipsis because it opens a form, and because a bare
+                      "Report" reads as something having been reported. */}
+                  <DropdownMenuItem onSelect={() => setDialog("report")}>
+                    <Flag />
+                    Report this account…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+
+            {/* You cannot follow yourself, so the control is absent rather than
+                disabled — a greyed-out "Unfollow" on your own profile describes a
+                relationship that cannot exist. */}
+            {isSelf ? null : (
+              <Button
+                variant={following ? "outline" : "default"}
+                size="sm"
+                // Rendered but inert until the identity layer owns kind-3 writes. A
+                // follow write must merge into the newest list on the network, and a
+                // button built from a stale snapshot silently unfollows everyone
+                // added since — so the capability arrives with the code that can do
+                // it safely, not before.
+                disabled={!onToggleFollow || followBusy}
+                onClick={() => onToggleFollow?.(pubkey)}
+                title={
+                  onToggleFollow
+                    ? undefined
+                    : "Following requires a signed-in account"
+                }
+              >
+                {followBusy ? <Loader2 className="animate-spin" /> : null}
+                {followBusy
+                  ? "Checking your list"
+                  : following
+                    ? "Unfollow"
+                    : "Follow"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {followError ? (
@@ -354,6 +428,23 @@ export function ProfileHeader({
           </div>
         </div>
       </div>
+
+      {dialog === "mute" ? (
+        <MuteDialog
+          target={{ kind: "pubkey", value: pubkey }}
+          name={displayName}
+          onClose={() => setDialog(undefined)}
+        />
+      ) : null}
+      {/* `noteId` omitted on purpose: that is what makes this the account-only
+          `["p", pubkey, type]` report rather than a claim about one note. */}
+      {dialog === "report" ? (
+        <ReportDialog
+          pubkey={pubkey}
+          name={displayName}
+          onClose={() => setDialog(undefined)}
+        />
+      ) : null}
     </header>
   );
 }

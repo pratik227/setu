@@ -37,8 +37,30 @@ export const Kind = {
   Reaction: 7,
   /** NIP-18 repost of a non-kind-1 event. */
   GenericRepost: 16,
+  /**
+   * NIP-68 picture-first post.
+   *
+   * Two digits, not five: 20 is a *regular* kind, well below the 20000–29999
+   * ephemeral band. Reading it as ephemeral would mean never storing a picture
+   * post, so `isEphemeral` is the thing to check when that suspicion arises.
+   */
+  Picture: 20,
+  /** NIP-71 video event, normal (landscape) orientation. */
+  Video: 21,
+  /** NIP-71 short-form portrait video. */
+  ShortVideo: 22,
   /** NIP-28 public channel message. */
   ChannelMessage: 42,
+  /**
+   * NIP-88 poll response.
+   *
+   * Numbered below the poll it answers (1068), which is only worth noting because
+   * the pair is easy to transpose — and a filter asking for 1068 when it wanted
+   * 1018 returns polls instead of votes and tallies every poll as unanswered.
+   */
+  PollResponse: 1018,
+  /** NIP-88 poll. */
+  Poll: 1068,
   /** NIP-22 comment. */
   Comment: 1111,
   /** NIP-94 file metadata. */

@@ -46,11 +46,19 @@ function sameAuthor(a: AuthorView, b: AuthorView): boolean {
  * which is immutable, so `mediaFor` below hands back the previous array whenever
  * the row still shows the same note. Building a fresh array here and comparing it
  * by reference would mark every media row changed on every tick.
+ *
+ * `tags` is the same bargain for free: it *is* the event's own array, so the same
+ * note always presents the same reference. Anything added to `NoteView` has to
+ * appear here and has to be either a scalar or a reference held across ticks —
+ * otherwise every row looks changed on every tick and the memo below skips
+ * nothing.
  */
 function sameView(a: NoteView, b: NoteView): boolean {
   return (
     a.id === b.id &&
     a.rowKey === b.rowKey &&
+    a.kind === b.kind &&
+    a.tags === b.tags &&
     a.content === b.content &&
     a.createdAt === b.createdAt &&
     sameAuthor(a.author, b.author) &&
@@ -149,6 +157,9 @@ export function toNoteViews(
       // own, and both rows would otherwise claim the same React key.
       rowKey: entry.key,
       author,
+      kind: source.kind,
+      // The event's own array, deliberately not a copy — see `NoteView.tags`.
+      tags: source.tags,
       createdAt: source.created_at,
       content: source.content,
       replyCount: counts.replies,

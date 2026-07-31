@@ -30,6 +30,15 @@ export interface ImetaEntry {
   readonly dim?: MediaDimensions;
   readonly alt?: string;
   readonly blurhash?: string;
+  /**
+   * The `image` field — a still frame for a video variant.
+   *
+   * NIP-71 puts a video's poster frame here rather than in a tag of its own, and it
+   * is the only thing that lets a video tile show something before the reader
+   * presses play. Untrusted like every other field: it is a URL heading for an
+   * `src`, so the caller's image allowlist decides whether it may be rendered.
+   */
+  readonly image?: string;
 }
 
 /**
@@ -93,6 +102,7 @@ export function parseImetaTag(tag: readonly string[]): ImetaEntry | undefined {
   const mimeType = fields.get("m");
   const alt = fields.get("alt");
   const blurhash = fields.get("blurhash");
+  const image = fields.get("image");
 
   return {
     url,
@@ -100,6 +110,7 @@ export function parseImetaTag(tag: readonly string[]): ImetaEntry | undefined {
     ...(dim ? { dim } : {}),
     ...(alt ? { alt } : {}),
     ...(blurhash ? { blurhash } : {}),
+    ...(image ? { image } : {}),
   };
 }
 

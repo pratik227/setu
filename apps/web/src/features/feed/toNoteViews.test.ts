@@ -214,6 +214,48 @@ describe("toNoteViews", () => {
     ]);
   });
 
+  it("carries the displayed event's kind and tags onto the view", () => {
+    // Both are what the row renders from: `kind` decides media-first ordering and
+    // whether a ballot is drawn, and `tags` is what the tokenizer resolves a
+    // deprecated `#[2]` mention and a `q`-tag quote against.
+    const tags = [["emoji", "a", "https://x.test/a.png"]];
+    const [view] = toNoteViews(
+      [noteEntry({ event: event({ kind: 20, tags }) })],
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(view?.kind).toBe(20);
+    expect(view?.tags).toBe(tags);
+  });
+
+  it("carries the reposted note's tags, not the wrapper's", () => {
+    const targetTags = [["q", "5".repeat(64)]];
+    const target = event({
+      id: "2".repeat(64),
+      pubkey: AUTHOR_B,
+      tags: targetTags,
+    });
+    const [view] = toNoteViews(
+      [
+        noteEntry({
+          key: "repost:2",
+          kind: "repost",
+          event: event({ id: "9".repeat(64), kind: 6, tags: [] }),
+          target,
+          targetId: target.id,
+          reposters: [REPOSTER],
+          repostIds: ["9".repeat(64)],
+        }),
+      ],
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(view?.tags).toBe(targetTags);
+    expect(view?.kind).toBe(1);
+  });
+
   it("resolves NIP-10 reply position", () => {
     const reply = noteEntry({
       event: event({
@@ -418,6 +460,49 @@ describe("toNoteViews identity", () => {
       first,
     );
     expect(second[0]?.media?.[0]?.url).toBe("https://x.test/a.png");
+  });
+
+  it("keeps identity for a row whose tags the renderer now reads", () => {
+    // The trap the `tags` field could have walked into. `sameView` compares it by
+    // reference, which is only sound because it *is* the event's own array — a
+    // defensive copy (`[...source.tags]`) would make every row with any tag at all
+    // look changed on every store tick, and the 98% saving in row renders would be
+    // gone for most of the feed.
+    const entries = [
+      noteEntry({
+        event: event({
+          content: "look at #[0]",
+          tags: [["p", AUTHOR_B]],
+        }),
+      }),
+    ];
+    const first = toNoteViews(entries, new Map(), new Map(), 0);
+    const second = toNoteViews(entries, new Map(), new Map(), 0, first);
+    expect(second[0]).toBe(first[0]);
+    expect(second[0]?.tags).toBe(first[0]?.tags);
+  });
+
+  it("produces a new object when the row starts showing a different kind", () => {
+    // A repost row's target can arrive after the wrapper, and the wrapper's kind
+    // decides media-first ordering — so a stale `kind` renders a picture post in
+    // text-first order forever.
+    const base = {
+      key: "repost:7",
+      kind: "repost" as const,
+      event: event({ id: "6".repeat(64), kind: 6, content: "" }),
+      targetId: "7".repeat(64),
+    };
+    const first = toNoteViews([noteEntry(base)], new Map(), new Map(), 0);
+    expect(first[0]?.kind).toBe(6);
+    const second = toNoteViews(
+      [noteEntry({ ...base, target: event({ id: "7".repeat(64), kind: 20 }) })],
+      new Map(),
+      new Map(),
+      0,
+      first,
+    );
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0]?.kind).toBe(20);
   });
 
   it("keeps identity for untouched rows while one row changes", () => {

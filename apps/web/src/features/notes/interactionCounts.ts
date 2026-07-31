@@ -18,8 +18,19 @@
  * interactions than we were served — `approximate` marks the ones where that is
  * demonstrably possible, and the UI must then present the number as a floor
  * rather than a total.
+ *
+ * ## Mutes reach the arithmetic, not just the rows
+ *
+ * A mute list that only hides rows leaves the muted account's replies and reactions
+ * inflating the totals on every note the reader *can* see — so a note with three
+ * visible answers reads "12 replies", and the nine missing ones are attributed to a
+ * bug rather than to a rule the reader set. `muteRules` closes that, and what is
+ * excluded is counted into {@link NoteInteractions.mutedOut} rather than silently
+ * subtracted: a number that got smaller with no explanation is the same failure
+ * wearing the other hat.
  */
 
+import { isMuted, isMuteRulesEmpty, type MuteRules } from "@setu/core";
 import { Kind, type NostrEvent } from "@setu/protocol";
 import { zapReceiptSats } from "./bolt11";
 
@@ -37,6 +48,19 @@ export interface NoteInteractions {
    * must render such a count as "500+", never as an exact number.
    */
   readonly approximate: boolean;
+  /**
+   * Interactions the reader's mute list removed from the numbers above.
+   *
+   * Optional, and absent rather than `0` when nothing was removed, so a surface
+   * can branch on presence and so the several places that build a
+   * `NoteInteractions` literal did not all have to change to say "nothing".
+   *
+   * This exists because the counts must never quietly shrink. It is one figure
+   * covering replies, reposts, reactions and zaps together: a reader being told
+   * "your mute list removed 9 of these" needs to know the number is filtered, not
+   * a per-kind breakdown of who they muted.
+   */
+  readonly mutedOut?: number;
 }
 
 export const EMPTY_INTERACTIONS: NoteInteractions = {
@@ -112,8 +136,36 @@ function sameCounts(a: NoteInteractions, b: NoteInteractions): boolean {
     a.zapSats === b.zapSats &&
     a.viewerReacted === b.viewerReacted &&
     a.viewerReposted === b.viewerReposted &&
-    a.approximate === b.approximate
+    a.approximate === b.approximate &&
+    // Compared through a default because the field is absent when zero. Left out
+    // of this check, a mute would change the number a row displays while the row
+    // kept the object it was already rendering — the count would not update until
+    // something else about the note changed.
+    (a.mutedOut ?? 0) === (b.mutedOut ?? 0)
   );
+}
+
+/**
+ * Does the reader's mute list cover this interaction?
+ *
+ * The rule is split by kind, and the split is the whole judgement here:
+ *
+ *  - **Replies and comments get every rule.** They carry prose the reader would be
+ *    shown in a thread, so a word or hashtag mute means the same thing about them
+ *    that it means about a feed row. Counting an answer the reader will never be
+ *    shown is what makes a reply count a promise the thread cannot keep.
+ *  - **Everything else gets the author rule alone.** A reaction's content is `+` or
+ *    a single emoji and a zap receipt's is a bolt11 invoice, so word rules have
+ *    nothing meaningful to match there — and a reader whose word list happened to
+ *    contain `+` would see every like count on the network drop to zero. Same
+ *    reasoning as the reposter rule in `moderation/muteEntries.ts`: these events
+ *    contribute a pubkey and a number, not content.
+ */
+function mutedInteraction(event: NostrEvent, rules: MuteRules): boolean {
+  if (event.kind === Kind.ShortTextNote || event.kind === Kind.Comment) {
+    return isMuted(event, rules);
+  }
+  return rules.pubkeys.has(event.pubkey);
 }
 
 export interface CountInput {
@@ -129,6 +181,14 @@ export interface CountInput {
    * interactions to honour the limit.
    */
   readonly limit: number;
+  /**
+   * The reader's mute rules. Interactions they cover are left out of the totals
+   * and counted into `mutedOut` instead.
+   *
+   * Omitted (or `NO_MUTES`) means count everything, and costs nothing: the empty
+   * case is checked once per call, not once per event.
+   */
+  readonly muteRules?: MuteRules;
   /** The previous result, for identity reuse. */
   readonly previous: ReadonlyMap<string, NoteInteractions>;
 }
@@ -143,20 +203,45 @@ export function countInteractions(
 ): ReadonlyMap<string, NoteInteractions> {
   const { noteIds, events, viewerPubkey, limit, previous } = input;
 
+  // Resolved once. An empty rule set is the common case and must not put a
+  // per-event predicate call on the hot path of a live feed's tally.
+  const rules =
+    input.muteRules !== undefined && !isMuteRulesEmpty(input.muteRules)
+      ? input.muteRules
+      : undefined;
+
   const wanted = new Set(noteIds);
   const tallies = new Map<string, Tally>();
   /** Events attributed to each note, to detect a note at the query's bound. */
   const seen = new Map<string, number>();
+  /** Attributed events the mute list removed, per note. */
+  const excluded = new Map<string, number>();
   for (const id of wanted) {
     tallies.set(id, emptyTally());
     seen.set(id, 0);
   }
 
   for (const event of events) {
+    // The reader's own interactions are never excluded: they are what
+    // `viewerReacted` and `viewerReposted` are read from, and a row that loses
+    // them offers to react a second time to something already reacted to.
+    const muted =
+      rules !== undefined &&
+      event.pubkey !== viewerPubkey &&
+      mutedInteraction(event, rules);
+
     for (const target of interactionTargets(event)) {
       const tally = tallies.get(target);
       if (tally === undefined) continue;
+      // Counted before the mute check, and deliberately: `seen` measures what the
+      // *relay* served, which is what decides `approximate`. Skipping muted events
+      // here would mark a note whose 500 served interactions were all from muted
+      // accounts as an exact zero, when the relay demonstrably had more.
       seen.set(target, (seen.get(target) ?? 0) + 1);
+      if (muted) {
+        excluded.set(target, (excluded.get(target) ?? 0) + 1);
+        continue;
+      }
       switch (event.kind) {
         // NIP-22 comments are replies. Both kinds land in the same bucket
         // because a reader counting answers does not distinguish them.
@@ -186,9 +271,11 @@ export function countInteractions(
   const next = new Map<string, NoteInteractions>();
   let changed = tallies.size !== previous.size;
   for (const [id, tally] of tallies) {
+    const mutedOut = excluded.get(id) ?? 0;
     const candidate: NoteInteractions = {
       ...tally,
       approximate: (seen.get(id) ?? 0) >= limit,
+      ...(mutedOut > 0 ? { mutedOut } : {}),
     };
     const before = previous.get(id);
     if (before !== undefined && sameCounts(before, candidate)) {
@@ -202,4 +289,23 @@ export function countInteractions(
   }
 
   return changed ? next : previous;
+}
+
+/**
+ * One sentence stating what this note's counts leave out, or `undefined` when they
+ * leave out nothing.
+ *
+ * Worded here rather than at the row so the disclosure cannot drift from the rule
+ * that produced it. It names the mute list, because "9 hidden" on a number the
+ * reader did not knowingly filter is a bug report, while "your mute list" is an
+ * explanation and points at the thing to change.
+ */
+export function mutedCountNotice(counts: NoteInteractions): string | undefined {
+  const removed = counts.mutedOut ?? 0;
+  if (removed === 0) return undefined;
+  return `${removed} ${
+    removed === 1
+      ? "reply, repost or reaction is"
+      : "replies, reposts or reactions are"
+  } not counted here because your mute list covers who made ${removed === 1 ? "it" : "them"}.`;
 }

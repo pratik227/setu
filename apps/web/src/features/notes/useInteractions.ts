@@ -30,9 +30,17 @@
  * Counts come from events we hold and verified. A NIP-45 `COUNT` would be one
  * round trip for the same numbers, and is refused: it asks the relay to be
  * authoritative for a figure we cannot check.
+ *
+ * The reader's mute list is applied to the tally, not to the query. Asking relays
+ * for "interactions except these authors" is not expressible in NIP-01 — filters
+ * have no negation — and asking per-author would multiply the one subscription this
+ * whole module exists to keep singular. So the events arrive and the mute rules are
+ * applied in `countInteractions`, which also means an un-mute restores the real
+ * number immediately from events already held, with no round trip at all.
  */
 
-import type { Engine } from "@setu/core";
+import type { Engine, MuteRules } from "@setu/core";
+import { NO_MUTES } from "@setu/core";
 import type { Filter, NostrEvent } from "@setu/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
@@ -41,6 +49,7 @@ import {
   acquireSharedSubscription,
   filtersContentKey,
 } from "../../engine/sharedSubscription";
+import { useMuteRules } from "../moderation/useMuteList";
 import {
   countInteractions,
   INTERACTION_KINDS,
@@ -98,6 +107,22 @@ class InteractionTracker {
   private releaseSubscription: (() => void) | null = null;
   private unobserve: (() => void) | null = null;
   private disposed = false;
+  private muteRules: MuteRules = NO_MUTES;
+  /**
+   * The last set the store handed us, kept so a mute list edit can be re-tallied
+   * without waiting for another event to arrive.
+   *
+   * Un-muting has to put the real number back *now* — a reader who un-mutes and
+   * watches a reply count stay wrong concludes the un-mute did not work. Holding
+   * these costs nothing: they are the same arrays the store is already holding, not
+   * copies.
+   */
+  private lastTally:
+    | {
+        readonly ids: readonly string[];
+        readonly events: readonly NostrEvent[];
+      }
+    | undefined;
 
   constructor(
     private readonly engine: Engine,
@@ -123,6 +148,21 @@ class InteractionTracker {
     this.schedule();
   }
 
+  /**
+   * Point the tally at a new mute list.
+   *
+   * Compared by reference, because `useMuteRules` gives one identity per version of
+   * the list — the store re-emits that list several times a second, and re-tallying
+   * every held interaction on each of those would be the most expensive thing this
+   * class does.
+   */
+  setMuteRules(rules: MuteRules): void {
+    if (this.disposed || this.muteRules === rules) return;
+    this.muteRules = rules;
+    const held = this.lastTally;
+    if (held !== undefined) this.absorb(held.ids, held.events);
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.timer !== null) clearTimeout(this.timer);
@@ -133,6 +173,7 @@ class InteractionTracker {
     this.releaseSubscription = null;
     this.listeners.clear();
     this.counts = NO_COUNTS;
+    this.lastTally = undefined;
   }
 
   /**
@@ -195,11 +236,13 @@ class InteractionTracker {
   }
 
   private absorb(ids: readonly string[], events: readonly NostrEvent[]): void {
+    this.lastTally = { ids, events };
     const next = countInteractions({
       noteIds: ids,
       events,
       ...(this.viewerPubkey ? { viewerPubkey: this.viewerPubkey } : {}),
       limit: INTERACTION_LIMIT,
+      muteRules: this.muteRules,
       previous: this.counts,
     });
     // Reference-equal when nothing changed, so a store tick that touched an
@@ -268,12 +311,20 @@ function releaseTracker(
  * up by id anyway. Entries are reference-stable across ticks: a note whose events
  * did not change comes back as the same object, so an arriving reaction re-renders
  * one row rather than the whole feed.
+ *
+ * Totals exclude accounts the reader has muted, and each entry carries `mutedOut`
+ * saying how many were left out, so a surface can state it rather than showing a
+ * number that quietly shrank.
  */
 export function useInteractions(
   noteIds: readonly string[],
   viewerPubkey?: string,
 ): ReadonlyMap<string, NoteInteractions> {
   const engine = useEngine();
+  // Read half only, and app-wide shared: this hook runs on every feed, thread and
+  // notification surface, so acquiring the write path here would put a publish
+  // capability behind a read of some numbers.
+  const { rules } = useMuteRules();
   const [counts, setCounts] =
     useState<ReadonlyMap<string, NoteInteractions>>(NO_COUNTS);
 
@@ -288,6 +339,19 @@ export function useInteractions(
       releaseTracker(engine, viewerPubkey);
     };
   }, [engine, viewerPubkey]);
+
+  /*
+   * Mute rules are handed over in an effect of their own, not in the lease above.
+   *
+   * Listing `rules` as a dependency of the lease would tear the tracker down and
+   * rebuild it on every mute edit — releasing the shared subscription and opening a
+   * new REQ for numbers we already hold. This effect only re-tallies. It runs after
+   * the lease on mount (declaration order), so the rules are in place before any
+   * event can arrive, and `setMuteRules` is a no-op on an unchanged rule set.
+   */
+  useEffect(() => {
+    peekTracker(engine, viewerPubkey)?.setMuteRules(rules);
+  }, [engine, viewerPubkey, rules]);
 
   // Content identity of the caller's set: a feed rebuilds this array on every
   // render, and registering interest on object identity would run every render.

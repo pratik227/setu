@@ -61,8 +61,23 @@ const NoteRow = memo(function NoteRow({
   onOpenProfile?(pubkey: string): void;
   onOpenHashtag?(tag: string): void;
 }) {
+  /*
+   * The tags go with the content, always.
+   *
+   * They were omitted here for a long time, and two visible bugs came out of that
+   * single gap: a deprecated NIP-08 positional mention has nothing to resolve
+   * against, so a pre-2023 note renders the literal characters `#[2]` where a name
+   * should be; and a quote repost that carries only a `q` tag has no inline
+   * reference to walk, so the quoted note was never rendered at all — the row
+   * showed a remark about something the reader was never shown.
+   *
+   * `note.tags` is the event's own array, so this costs the row's memoisation
+   * nothing: it is the same reference on every tick and the tokenizing memo below
+   * does not re-run.
+   */
   const { body, media } = useRenderedContent({
     content: note.content,
+    tags: note.tags,
     onOpenHashtag,
   });
 

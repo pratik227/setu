@@ -33,7 +33,14 @@ const PATTERNS = [
 const files = [];
 for await (const entry of glob("{packages,apps}/**/*.{ts,tsx,css}", {
   cwd: ROOT,
-  exclude: (p) => p.includes("node_modules") || p.includes("dist"),
+  // `src-tauri` is Cargo's build cache plus Tauri's generated bindings, none of it
+  // committed. It matters here specifically because Tauri's asset codegen copies
+  // the *built* stylesheet into `target/`, where every Tailwind-emitted
+  // `font-size:` would read as a violation in a file with no author to fix it.
+  // Today that copy happens to be brotli-compressed so the regex finds nothing —
+  // a guard that passes by luck is a guard that breaks on the next Tauri release.
+  exclude: (p) =>
+    p.includes("node_modules") || p.includes("dist") || p.includes("src-tauri"),
 })) {
   files.push(entry);
 }

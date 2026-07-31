@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NotificationItem } from "./groupNotifications";
 import {
+  clearNotificationsRead,
   countUnread,
   lastSeenKey,
   markNotificationsRead,
@@ -174,5 +175,58 @@ describe("persistence", () => {
     expect(() => markNotificationsRead(ALICE, 1000)).not.toThrow();
     // The in-memory mirror still answers for this tab; it just is not remembered.
     expect(readLastSeen(ALICE)).toBe(1000);
+  });
+});
+
+describe("clearNotificationsRead — sign-out", () => {
+  let backing: Map<string, string>;
+
+  beforeEach(() => {
+    backing = installStorage();
+    resetReadStateCache();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+    resetReadStateCache();
+  });
+
+  it("removes the watermark rather than zeroing it", () => {
+    // Zero is a *valid* watermark meaning "seen nothing", so writing it would mark a
+    // year of history unread. Absent is the state the first-run rule is written for.
+    seedLastSeen(ALICE, 1000);
+    clearNotificationsRead(ALICE);
+    expect(backing.has(`setu:notifications:lastSeen:${ALICE}`)).toBe(false);
+    expect(readLastSeen(ALICE)).toBeUndefined();
+    expect(countUnread([item(1), item(2)], readLastSeen(ALICE))).toBe(0);
+  });
+
+  it("clears the in-memory mirror too", () => {
+    // The mirror is what the badge reads. Leaving it behind would keep showing the
+    // signed-out account's count until something unrelated re-rendered.
+    seedLastSeen(ALICE, 1000);
+    backing.clear();
+    clearNotificationsRead(ALICE);
+    expect(readLastSeen(ALICE)).toBeUndefined();
+  });
+
+  it("touches only the named account", () => {
+    seedLastSeen(ALICE, 1000);
+    seedLastSeen(BOB, 2000);
+    clearNotificationsRead(ALICE);
+    expect(readLastSeen(BOB)).toBe(2000);
+  });
+
+  it("notifies subscribers, and does nothing without a pubkey", () => {
+    seedLastSeen(ALICE, 1000);
+    let calls = 0;
+    const unsubscribe = subscribeReadState(() => {
+      calls += 1;
+    });
+    clearNotificationsRead(undefined);
+    expect(calls).toBe(0);
+    clearNotificationsRead(ALICE);
+    unsubscribe();
+    expect(calls).toBe(1);
   });
 });

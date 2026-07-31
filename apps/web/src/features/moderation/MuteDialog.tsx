@@ -8,6 +8,8 @@ import {
   DialogTitle,
   Spinner,
 } from "@setu/ui";
+import { useState } from "react";
+import { MutedListDialog } from "./MutedListDialog";
 import { type MuteTarget, muteRulesInclude } from "./muteList";
 import { useMuteAction, useMuteRules } from "./useMuteList";
 
@@ -25,12 +27,18 @@ import { useMuteAction, useMuteRules } from "./useMuteList";
  *    unaffected);
  *  - that it is private (it is not — the list is published to the reader's own
  *    relays as an ordinary unencrypted event, and Setu writes only that public half);
- *  - that it removes them from the network's counts (it does not — see the note on
- *    counts, which is the one part of this feature that stops at the row).
+ *  - that it removes them from the network (it does not — Setu's own counts stop
+ *    including them, but the reaction and the reply still exist, and every other
+ *    client still counts them).
  *
  * Getting that wrong is not a cosmetic failure. Someone who mutes an account
  * believing it cannot reach them any more has made a safety decision on a false
  * premise, which is worse than not having the feature.
+ *
+ * The "Manage muted" affordance is here rather than only in settings because this is
+ * where the reader learns that word and hashtag mutes exist at all, and because a
+ * rule they cannot find is a rule they cannot undo — an unaccountable word mute
+ * presents as a feed that has quietly stopped working.
  */
 
 export interface MuteDialogProps {
@@ -44,8 +52,14 @@ export interface MuteDialogProps {
 export function MuteDialog({ target, name, onClose }: MuteDialogProps) {
   const { rules, hasPrivateEntries } = useMuteRules();
   const { state, apply } = useMuteAction();
+  const [managing, setManaging] = useState(false);
   const muted = muteRulesInclude(rules, target);
   const working = state.status === "working";
+
+  // Replaces this dialog rather than stacking on top of it: two dialogs deep, the
+  // reader loses track of which one the Cancel button belongs to, and the confirm
+  // step behind an open list is no longer a question anybody is answering.
+  if (managing) return <MutedListDialog onClose={onClose} />;
 
   const confirm = () => {
     void (async () => {
@@ -84,8 +98,9 @@ export function MuteDialog({ target, name, onClose }: MuteDialogProps) {
             unencrypted event, so who you have muted is readable by anyone.
           </li>
           <li>
-            Reply and reaction counts on notes you can still see include muted
-            accounts. Setu hides their notes, not their arithmetic.
+            Their replies and reactions stop counting towards the totals on
+            notes you can still see, and Setu says how many it left out. Other
+            clients still count them.
           </li>
           {hasPrivateEntries ? (
             <li>
@@ -100,6 +115,16 @@ export function MuteDialog({ target, name, onClose }: MuteDialogProps) {
         ) : null}
 
         <DialogFooter>
+          {/* First in the footer so it is not mistaken for the confirm button, and
+              a link rather than a button because it navigates instead of acting. */}
+          <Button
+            variant="link"
+            className="mr-auto px-0"
+            onClick={() => setManaging(true)}
+            disabled={working}
+          >
+            Manage muted
+          </Button>
           <Button variant="outline" onClick={onClose} disabled={working}>
             Cancel
           </Button>

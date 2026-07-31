@@ -1,10 +1,13 @@
 import { encodeNote, truncateNpub } from "@setu/protocol";
 import { cn } from "@setu/ui";
 import { CornerDownRight, HelpCircle } from "lucide-react";
+import { useSession } from "../identity/SessionProvider";
 import type { NoteRowActions, NoteRowStatus } from "../notes/NoteActionRow";
 import { NoteCard } from "../notes/NoteCard";
 import { useRenderedContent } from "../notes/NoteContent";
+import { ReactionRow } from "../notes/ReactionRow";
 import type { NoteView } from "../notes/types";
+import { useNoteReactions } from "../notes/useNoteReactions";
 
 /**
  * Indentation per nesting level, capped by the tree builder.
@@ -55,14 +58,34 @@ export function ThreadRow({
   onOpenProfile,
   onOpenHashtag,
 }: ThreadRowProps) {
+  // Tags, not just content: without them a deprecated `#[2]` mention renders as
+  // those literal characters, and a quote repost carrying only a `q` tag has
+  // nothing for the renderer to embed. Same gap the feed row had.
   const { body, media } = useRenderedContent({
     content: note.content,
+    tags: note.tags,
     onOpenHashtag,
   });
 
   // Media parsed out of the content stands in for imeta tags until the store
   // supplies them; explicit media on the view model always wins.
   const withMedia = note.media ? note : { ...note, media };
+
+  /*
+   * The per-emoji breakdown, on the focused note only.
+   *
+   * Not on every row, and the reason is a cost rather than a design preference:
+   * `useNoteReactions` installs a store observer per note, so a thread with forty
+   * replies would install forty of them and each one is another callback the store
+   * fans out to on every write. The focused note is the one a reader is actually
+   * looking at, and it is always inside the interaction tracker's window — so the
+   * kind-7s are already in the store and this costs no relay traffic at all.
+   *
+   * The empty string is what makes the hook a no-op for an unfocused row; the hook
+   * still runs, because hook order cannot be conditional.
+   */
+  const { session } = useSession();
+  const reactions = useNoteReactions(focused ? note.id : "", session?.pubkey);
 
   return (
     <div
@@ -80,6 +103,9 @@ export function ThreadRow({
       <NoteCard
         note={withMedia}
         body={body}
+        {...(focused
+          ? { reactions: <ReactionRow reactions={reactions} /> }
+          : {})}
         {...(actions ? { actions } : {})}
         {...(status ? { status } : {})}
         onOpenProfile={onOpenProfile}

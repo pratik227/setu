@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Setu",
+  "version": "0.0.0",
+  "identifier": "app.setu.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @setu/web dev --strictPort",
+    "devUrl": "http://localhost:5273",
+    "beforeBuildCommand": "pnpm --filter @setu/web build",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Setu",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 640,
+        "minHeight": 480,
+        "center": true,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'",
+      "freezePrototype": true,
+      "capabilities": ["default"],
+      "assetProtocol": {
+        "enable": false,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "SocialNetworking",
+    "shortDescription": "A Nostr social client",
+    "longDescription": "Setu is a Nostr social client. Setu is Sanskrit for bridge.",
+    "copyright": "Licensed under the Apache License, Version 2.0",
+    "licenseFile": "../../../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "createUpdaterArtifacts": false
+  }
+}

@@ -6,8 +6,8 @@ import { cn } from "../lib/cn";
  * A sidebar row.
  *
  * Hover and active are neutral ink washes — 4% and 7% — with the label keeping
- * the normal foreground colour. Buzz's rule, and worth stating because the
- * obvious alternative is worse: filling the active row with the accent and
+ * the normal foreground colour. Worth stating because the obvious
+ * alternative is worse: filling the active row with the accent and
  * recolouring its text makes the nav shout, and on a client where the nav is
  * always visible and rarely the subject, the selected row only has to be
  * findable, not loud.

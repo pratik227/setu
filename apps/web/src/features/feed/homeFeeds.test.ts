@@ -32,7 +32,14 @@ describe("homeFeedDefinition", () => {
       now: NOW,
     });
     expect(definition?.authors).toEqual(FOLLOWS);
-    expect(definition?.kinds).toEqual([Kind.ShortTextNote, Kind.Repost]);
+    expect(definition?.kinds).toEqual([
+      Kind.ShortTextNote,
+      Kind.Repost,
+      Kind.Picture,
+      Kind.Video,
+      Kind.ShortVideo,
+      Kind.Poll,
+    ]);
     // An author-scoped feed is already bounded by the author set; a time bound
     // on top of it would hide a quiet account's older notes.
     expect(definition?.since).toBeUndefined();
@@ -54,6 +61,20 @@ describe("homeFeedDefinition", () => {
       now: NOW,
     });
     expect(without?.kinds).not.toContain(Kind.Comment);
+  });
+
+  it("asks for the media-first and poll kinds, not only text notes", () => {
+    // A feed that asks only for kind 1 shows an account that publishes pictures as
+    // an account that has stopped posting.
+    const definition = homeFeedDefinition({
+      id: "latest",
+      followedAuthors: FOLLOWS,
+      relays: RELAYS,
+      now: NOW,
+    });
+    for (const kind of [Kind.Picture, Kind.Video, Kind.ShortVideo, Kind.Poll]) {
+      expect(definition?.kinds).toContain(kind);
+    }
   });
 
   it("bounds the global feed to the last 24 hours", () => {

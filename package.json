@@ -12,6 +12,8 @@
   "scripts": {
     "dev": "pnpm --filter @setu/web dev",
     "build": "pnpm --filter @setu/web build",
+    "dev:desktop": "pnpm --filter @setu/desktop dev",
+    "build:desktop": "pnpm --filter @setu/desktop build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "biome check .",

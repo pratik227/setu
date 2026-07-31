@@ -43,6 +43,17 @@ interface ThemeContextValue extends PersistedTheme {
   setMode(mode: ThemeMode): void;
   setThemeId(id: string): void;
   setAccentId(id: string): void;
+  /**
+   * Apply several appearance values at once.
+   *
+   * Exists for updates that arrive from outside the UI — settings restored from
+   * another device, in Setu's case. Doing that through the three setters is not
+   * equivalent: each one is its own state update and its own persist, so a reader
+   * sees the new theme against the old accent for a frame, and an interrupted
+   * sequence leaves a half-applied appearance in `localStorage` that the next
+   * reload paints. One update, one write.
+   */
+  setAppearance(next: Partial<PersistedTheme>): void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
@@ -155,9 +166,33 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const setAppearance = useCallback(
+    (next: Partial<PersistedTheme>) =>
+      setState((s) => {
+        // Bail out when nothing differs, so an external synchroniser confirming
+        // that the stored appearance already matches does not re-render the tree
+        // or rewrite `localStorage` on every check.
+        const merged = { ...s, ...next };
+        return merged.mode === s.mode &&
+          merged.themeId === s.themeId &&
+          merged.accentId === s.accentId
+          ? s
+          : merged;
+      }),
+    [],
+  );
+
   const value = useMemo<ThemeContextValue>(
-    () => ({ ...state, isDark, theme, setMode, setThemeId, setAccentId }),
-    [state, isDark, theme, setMode, setThemeId, setAccentId],
+    () => ({
+      ...state,
+      isDark,
+      theme,
+      setMode,
+      setThemeId,
+      setAccentId,
+      setAppearance,
+    }),
+    [state, isDark, theme, setMode, setThemeId, setAccentId, setAppearance],
   );
 
   return (

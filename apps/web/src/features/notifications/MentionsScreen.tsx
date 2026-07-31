@@ -6,6 +6,8 @@ import { useMemo, useRef, useState } from "react";
 import { FeedView } from "../feed/FeedView";
 import { noteIdsIn, pubkeysIn, toNoteViews } from "../feed/toNoteViews";
 import { useFollows } from "../identity/useFollows";
+import { muteFilterNotice } from "../moderation/muteEntries";
+import { useMutedFeed } from "../moderation/useMutedFeed";
 import type { NoteView } from "../notes/types";
 import { useInteractions } from "../notes/useInteractions";
 import { useNoteRowActions } from "../notes/useNoteRowActions";
@@ -47,6 +49,24 @@ import { useNotifications } from "./useNotifications";
  * follows — the exact trap `useFollows` documents. A brand-new account that
  * follows nobody gets "Everyone" for the same reason. Once the reader picks a
  * scope, their choice sticks for the session and no longer tracks the list.
+ *
+ * ## Why the mute list matters more here than anywhere
+ *
+ * The scope control above handles the *volume* problem and nothing else. It is a
+ * blunt instrument — "people you follow" also hides every genuine stranger — and on
+ * "Everyone" it does nothing at all. The mute list is the precise instrument for the
+ * same channel, and this is the screen where a reader most needs it: a mention is
+ * addressed *at them*, so one determined account can put itself at the top of this
+ * list indefinitely for the cost of a `p` tag, and no follow-graph heuristic will
+ * stop it.
+ *
+ * So mutes are applied here as well, as a **second, separately counted pass**. Two
+ * counts rather than one because the two filters answer different questions and a
+ * combined figure would be unactionable: "12 hidden" leaves the reader unable to
+ * tell whether switching scope would show them, or whether they muted somebody. It
+ * runs above the metadata window for the same reason `LiveFeed` does it there — a
+ * muted account that reached the view still took a profile fetch, an interaction
+ * slot and a row action entry on the way.
  */
 
 const MENTION_KINDS: readonly number[] = [Kind.ShortTextNote, Kind.Comment];
@@ -105,7 +125,7 @@ export function MentionsScreen({
 
   const hidden = addressed.length - shown.length;
 
-  const entries = useMemo<readonly FeedEntry[]>(
+  const scoped = useMemo<readonly FeedEntry[]>(
     () =>
       shown.map((event) => ({
         key: `note:${event.id}`,
@@ -118,6 +138,12 @@ export function MentionsScreen({
     [shown],
   );
 
+  // The mute pass, above everything that charges per row. `useMutedFeed` holds the
+  // per-row identity cache, so an unchanged row comes back as the same object and
+  // the memoisation below survives.
+  const muted = useMutedFeed(scoped);
+  const entries = muted.entries;
+
   const resolvable = useMemo(
     () => entries.slice(0, METADATA_WINDOW),
     [entries],
@@ -128,11 +154,14 @@ export function MentionsScreen({
   const authors = useAuthors(pubkeys);
   const interactions = useInteractions(noteIds, viewerPubkey);
 
+  // Built from the rows that survived the mute pass, not from `shown`: an event in
+  // this map is one the row actions can reply to, react to and report, and a muted
+  // account has no row to act from.
   const eventMap = useMemo(() => {
     const map = new Map<string, NostrEvent>();
-    for (const event of shown) map.set(event.id, event);
+    for (const entry of entries) map.set(entry.event.id, entry.event);
     return map;
-  }, [shown]);
+  }, [entries]);
   const { actions, statuses } = useNoteRowActions(eventMap);
 
   /*
@@ -161,6 +190,21 @@ export function MentionsScreen({
           "A mention is a note that tags your public key, so there is nothing to fetch until this client knows which key that is.",
       };
     }
+    /*
+     * The mute list is checked before the scope filter, and that order is the
+     * point: a screen that fetched mentions and muted every one of them must not
+     * say "nobody has mentioned you". That reads as a broken relay set and sends
+     * the reader to settings to fix something that is working exactly as they
+     * asked.
+     */
+    if (muted.hiddenRows > 0 && scoped.length === muted.hiddenRows) {
+      return {
+        title: "Every mention here is muted",
+        description: `${muted.hiddenRows} ${
+          muted.hiddenRows === 1 ? "note that mentions" : "notes that mention"
+        } you ${muted.hiddenRows === 1 ? "was" : "were"} hidden by your mute list. Nothing is wrong with your relays.`,
+      };
+    }
     if (scope === "follows" && hidden > 0) {
       return {
         title: "No mentions from people you follow",
@@ -177,6 +221,7 @@ export function MentionsScreen({
   };
 
   const empty = emptyCopy();
+  const mutedNotice = muteFilterNotice(muted);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -206,6 +251,7 @@ export function MentionsScreen({
         actions={actions}
         statuses={statuses}
         loading={loading && notes.length === 0}
+        {...(mutedNotice !== undefined ? { mutedNotice } : {})}
         onOpenThread={onOpenThread}
         onOpenProfile={onOpenProfile}
         onOpenHashtag={onOpenHashtag}

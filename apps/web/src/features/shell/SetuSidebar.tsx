@@ -20,7 +20,6 @@ import {
   Compass,
   Hash,
   Home,
-  LogOut,
   MessageCircle,
   PenLine,
   PenSquare,
@@ -30,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { AccountMenu } from "../identity/AccountSwitcher";
 import { useSession } from "../identity/SessionProvider";
 import { useAuthors } from "../profiles/useAuthors";
 import { type Route, sameRoute } from "./routes";
@@ -53,7 +53,7 @@ export function SetuSidebar({
   pinnedHashtags,
   onUnpinHashtag,
 }: SetuSidebarProps) {
-  const { session, signOut } = useSession();
+  const { session } = useSession();
   const [tagsOpen, setTagsOpen] = useState(true);
 
   const authors = useAuthors(session ? [session.pubkey] : []);
@@ -242,16 +242,13 @@ export function SetuSidebar({
                 </span>
               </span>
             </button>
-            <Tooltip label="Sign out">
-              <Button
-                variant="chrome"
-                size="icon-xs"
-                aria-label="Sign out"
-                onClick={signOut}
-              >
-                <LogOut />
-              </Button>
-            </Tooltip>
+            {/* The account menu replaced a bare sign-out button. A single
+                sign-out control was the only way to leave an account, and it
+                erases that account's cached notes and read state — so "I want to
+                use my other identity for a minute" and "remove me from this
+                computer" were the same click. They are now separate items with
+                separate wording, and switching is the cheap one. */}
+            <AccountMenu />
           </>
         ) : (
           <span className="flex-1 text-xs text-muted-foreground">

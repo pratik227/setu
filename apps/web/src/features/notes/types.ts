@@ -89,6 +89,31 @@ export interface NoteView {
    */
   readonly rowKey: string;
   readonly author: AuthorView;
+  /**
+   * The displayed event's kind.
+   *
+   * Carried because several rendering rules are decided by it and cannot be
+   * derived from anything else on this object: a NIP-68 picture and a NIP-71 video
+   * put their media *before* the text rather than after it, and a NIP-88 poll
+   * renders a ballot instead of a body. A scalar, so it costs the row's
+   * memoisation nothing.
+   */
+  readonly kind: number;
+  /**
+   * The displayed event's tags, exactly as it carried them.
+   *
+   * The row needs them, and passing them is the fix for two visible bugs: without
+   * tags the tokenizer cannot resolve a deprecated NIP-08 `#[2]` mention, so old
+   * notes render the literal characters `#[2]`, and a quote repost that carries
+   * only a `q` tag has nothing to render at all.
+   *
+   * **This is the event's own array, never a copy.** Events are immutable, so the
+   * same note always hands back the same array — which is what lets `sameView`
+   * compare it by reference. Building a fresh array here (`[...source.tags]`)
+   * would mark every row changed on every store tick and destroy the row
+   * memoisation for the entire feed.
+   */
+  readonly tags: readonly (readonly string[])[];
   readonly createdAt: number;
   readonly content: string;
   readonly media?: readonly MediaView[];

@@ -24,7 +24,12 @@ const TEST_LIMIT = 1000;
 const files = [];
 for await (const entry of glob("{packages,apps}/**/*.{ts,tsx}", {
   cwd: ROOT,
-  exclude: (p) => p.includes("node_modules") || p.includes("dist"),
+  // `src-tauri` holds Cargo's build cache and Tauri's generated ACL bindings.
+  // Nothing in there is hand-written or committed, so a generated file tripping
+  // the ceiling would be a failure nobody can act on — the instruction "split
+  // the file" has no addressee.
+  exclude: (p) =>
+    p.includes("node_modules") || p.includes("dist") || p.includes("src-tauri"),
 })) {
   files.push(entry);
 }

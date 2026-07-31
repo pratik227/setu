@@ -1,4 +1,4 @@
-import { encodeNpub } from "@setu/protocol";
+import { emojiTagMap, encodeNpub, getTagValue, Kind } from "@setu/protocol";
 import {
   Avatar,
   AvatarFallback,
@@ -23,14 +23,17 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
+import { EmojiText } from "./CustomEmoji";
 import {
   NoteActionRow,
   type NoteRowActions,
   type NoteRowStatus,
 } from "./NoteActionRow";
 import { NoteMedia } from "./NoteMedia";
+import { isMediaFirstKind, isTitledKind } from "./noteKinds";
 import { copyText } from "./noteLink";
+import { PollCard } from "./PollCard";
 import { ProvenanceChip } from "./ProvenanceChip";
 import { absoluteTime, relativeTime } from "./relativeTime";
 import type { NoteView } from "./types";
@@ -43,6 +46,16 @@ export interface NoteCardProps {
   provenanceRelays?: readonly string[];
   /** Rendered body. Passed in so tokenization stays out of the row component. */
   body?: ReactNode;
+  /**
+   * The per-emoji reaction breakdown, when the surface has one.
+   *
+   * Passed in rather than read here, for the same reason `body` is: reading it
+   * needs a store observer, and one per card would put eighty observers behind a
+   * feed page. A surface that can afford it — the thread's focused note, which is
+   * always inside the interaction tracker's window — supplies it; every other row
+   * renders the aggregate count in the action row and nothing more.
+   */
+  reactions?: ReactNode;
   onOpenThread?(id: string): void;
   onOpenProfile?(pubkey: string): void;
   /**
@@ -77,6 +90,7 @@ export function NoteCard({
   note,
   provenanceRelays,
   body,
+  reactions,
   onOpenThread,
   onOpenProfile,
   actions,
@@ -96,6 +110,26 @@ export function NoteCard({
   const hidden = Boolean(note.contentWarning) && !revealed;
   const clampable = note.content.length > CLAMP_CHARS;
   const clamped = clampable && !expanded;
+
+  /*
+   * Media-first kinds, and why the ordering is not a preference.
+   *
+   * A kind-1 with an image URL in it reads text-first: the sentence introduces the
+   * picture. A NIP-68 picture post and a NIP-71 video put the media in `imeta` tags
+   * and use the content as a *caption* — so kind-1 ordering puts the caption above
+   * the thing it describes, and for a video event with empty content it puts an
+   * empty paragraph above the player.
+   */
+  const mediaFirst = isMediaFirstKind(note.kind);
+  const isPoll = note.kind === Kind.Poll;
+  // NIP-68/NIP-71 both carry the headline in a `title` tag rather than in content.
+  // Gated on the kind, not merely on the tag's presence — see `isTitledKind`.
+  const title = isTitledKind(note.kind)
+    ? getTagValue(note, "title")
+    : undefined;
+  // NIP-30 shortcodes appear in a title and in a poll question too, not only in the
+  // body the tokenizer handles.
+  const emoji = useMemo(() => emojiTagMap({ tags: note.tags }), [note.tags]);
 
   return (
     <article
@@ -287,60 +321,91 @@ export function NoteCard({
             </div>
           ) : (
             <>
-              {/*
-               * The "open this thread" target is a positioned sibling of the
-               * text, not a button wrapped around it.
-               *
-               * Wrapping was invalid markup and genuinely broken: note content
-               * renders hashtags, mentions and links as their own buttons, and a
-               * button inside a button has no defined behaviour — browsers pick
-               * one, so tapping a hashtag could open the thread instead. Nesting
-               * also collapsed the whole note into one accessibility node,
-               * hiding every inline link from a screen reader.
-               *
-               * Overlaying it instead keeps the row clickable while leaving the
-               * inline controls on top (`relative` beats a static sibling at the
-               * same z-index) and individually reachable.
-               */}
-              <div className="relative mt-0.5">
-                <button
-                  type="button"
-                  aria-label="Open thread"
-                  onClick={() => onOpenThread?.(note.id)}
-                  className="absolute inset-0 cursor-pointer focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden"
-                />
-                <div
-                  className={cn(
-                    "pointer-events-none relative text-base leading-relaxed break-words whitespace-pre-wrap",
-                    // Inline controls opt back in; the prose around them stays
-                    // transparent to clicks so the overlay receives them.
-                    "[&_a]:pointer-events-auto [&_button]:pointer-events-auto",
-                    clamped && "max-h-64 overflow-hidden",
-                  )}
-                >
-                  {body ?? note.content}
-                  {clamped ? (
-                    // Fade the cut edge so it reads as truncation rather than a
-                    // sentence that happens to stop.
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-card"
-                    />
-                  ) : null}
-                </div>
-              </div>
-              {clampable ? (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  className="mt-1 text-xs font-medium text-primary hover:underline"
-                >
-                  {expanded ? "Show less" : "Show more"}
-                </button>
+              {/* Media above the text for the kinds whose media *is* the post.
+                  See `mediaFirst` above for why this is not a style choice. */}
+              {mediaFirst && note.media ? (
+                <NoteMedia media={note.media} className="mt-1.5" />
               ) : null}
-              {note.media ? <NoteMedia media={note.media} /> : null}
+
+              {title ? (
+                <p className="mt-1.5 text-base font-semibold break-words">
+                  <EmojiText text={title} emoji={emoji} />
+                </p>
+              ) : null}
+
+              {/* A poll renders a ballot *instead of* the body. A kind-1068's
+                  content is the question, so rendering both would print it
+                  twice — and the thread overlay below must not cover the option
+                  buttons, or every vote would open the thread instead. */}
+              {isPoll ? <PollCard note={note} emoji={emoji} /> : null}
+
+              {isPoll ? null : (
+                <>
+                  {/*
+                   * The "open this thread" target is a positioned sibling of the
+                   * text, not a button wrapped around it.
+                   *
+                   * Wrapping was invalid markup and genuinely broken: note content
+                   * renders hashtags, mentions and links as their own buttons, and a
+                   * button inside a button has no defined behaviour — browsers pick
+                   * one, so tapping a hashtag could open the thread instead. Nesting
+                   * also collapsed the whole note into one accessibility node,
+                   * hiding every inline link from a screen reader.
+                   *
+                   * Overlaying it instead keeps the row clickable while leaving the
+                   * inline controls on top (`relative` beats a static sibling at the
+                   * same z-index) and individually reachable.
+                   */}
+                  <div className="relative mt-0.5">
+                    <button
+                      type="button"
+                      aria-label="Open thread"
+                      onClick={() => onOpenThread?.(note.id)}
+                      className="absolute inset-0 cursor-pointer focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden"
+                    />
+                    <div
+                      className={cn(
+                        "pointer-events-none relative text-base leading-relaxed break-words whitespace-pre-wrap",
+                        // Inline controls opt back in; the prose around them stays
+                        // transparent to clicks so the overlay receives them.
+                        "[&_a]:pointer-events-auto [&_button]:pointer-events-auto",
+                        clamped && "max-h-64 overflow-hidden",
+                      )}
+                    >
+                      {body ?? note.content}
+                      {clamped ? (
+                        // Fade the cut edge so it reads as truncation rather than a
+                        // sentence that happens to stop.
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-card"
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                  {clampable ? (
+                    <button
+                      type="button"
+                      onClick={() => setExpanded((v) => !v)}
+                      className="mt-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      {expanded ? "Show less" : "Show more"}
+                    </button>
+                  ) : null}
+                </>
+              )}
+              {/* Attachment position — under the text, for a note whose text came
+                  first. The media-first kinds rendered theirs above already, and
+                  rendering it twice is what an unconditional call here would do. */}
+              {!mediaFirst && note.media ? (
+                <NoteMedia media={note.media} />
+              ) : null}
             </>
           )}
+
+          {/* Above the action row, not inside it: the chips are a statement about
+              the note, and the row below them is a set of controls. */}
+          {reactions}
 
           <div className="flex items-center gap-2">
             <NoteActionRow

@@ -17,27 +17,29 @@ import { usePublish } from "../compose/usePublish";
 import { useSession } from "../identity/SessionProvider";
 import { editProfile, type ProfileFields, profileFields } from "./profileEdit";
 import { DmRelaySection, RelaySection } from "./RelaySettings";
+import { SyncSection } from "./SyncSettings";
 import { SaveRow, useOwnReplaceable } from "./settingsShared";
 
 /**
  * Settings.
  *
- * Three sections, and the first two both publish *replaceable* events, which is the
- * fact that shapes the whole screen. A kind-0 or kind-10002 write replaces the
- * previous one entirely, so a form that submits what it happens to have loaded can
- * delete everything it did not load. The edit modules (`profileEdit`,
- * `relayListEdit`) refuse to write from an unconfirmed absence; this screen's job is
- * to wait for the fetch and to say what it is waiting for rather than presenting an
- * empty form as if it were the truth.
+ * Every section below Appearance publishes an event that *replaces* its predecessor —
+ * kind 0, kind 10002, kind 10050, and the kind-30078 settings document — which is the
+ * fact that shapes the whole screen. A form that submits what it happens to have
+ * loaded deletes everything it did not load. The edit modules (`profileEdit`,
+ * `relayListEdit`, `sync/syncDecision`) all refuse to write from an unconfirmed
+ * absence; this screen's job is to wait for the fetch and to say what it is waiting
+ * for rather than presenting an empty form as if it were the truth.
+ *
+ * Appearance is first and deliberately unconditional: it is device-local state that
+ * works with no account at all. Settings sync (the section below Profile) can carry
+ * it to another device, but nothing on this screen depends on that having happened.
  *
  * Relay capabilities are shown because they explain behaviour a reader would
  * otherwise blame on the client. A relay that wants payment answers queries with
  * silence, not an error — so "Payment required" next to a relay is the difference
  * between "this app is broken" and "that door is shut".
  */
-
-/** How long to wait before treating a missing list as genuinely absent. */
-const _ABSENT_AFTER_MS = 8000;
 
 export function SettingsScreen() {
   const { session } = useSession();
@@ -49,6 +51,7 @@ export function SettingsScreen() {
         {session ? (
           <>
             <ProfileSection />
+            <SyncSection />
             <RelaySection />
             <DmRelaySection />
           </>
@@ -57,6 +60,9 @@ export function SettingsScreen() {
             <p className="px-4 pb-4 text-xs text-muted-foreground">
               Your profile and relay list live on relays under your public key,
               so there is nothing to load or save until this client has one.
+              Appearance and the other preferences above are kept on this device
+              and work signed out — signing in only adds the option to carry
+              them to another one.
             </p>
           </Panel>
         )}

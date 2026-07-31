@@ -20,7 +20,29 @@ import { Kind } from "@setu/protocol";
  * So the third feed is bounded by time and named for what it is.
  */
 
-export const NOTE_KINDS: readonly number[] = [Kind.ShortTextNote, Kind.Repost];
+/**
+ * The kinds a timeline shows.
+ *
+ * Wider than kind 1 + kind 6, and each addition is a kind the reader would
+ * otherwise never see at all rather than a nicety. A NIP-68 picture post, a NIP-71
+ * video and a NIP-88 poll are all first-class posts on the network; a feed that
+ * asks only for kind 1 shows an account that publishes pictures as an account that
+ * has stopped posting.
+ *
+ * The cost is bounded in a way a hashtag or author filter is not: these kinds are
+ * orders of magnitude rarer than kind 1, so naming them widens the filter without
+ * meaningfully widening the traffic. Adding a *high-volume* kind here would be a
+ * different decision — see `GLOBAL_WINDOW_SECONDS` for what it takes to make an
+ * unscoped feed affordable.
+ */
+export const NOTE_KINDS: readonly number[] = [
+  Kind.ShortTextNote,
+  Kind.Repost,
+  Kind.Picture,
+  Kind.Video,
+  Kind.ShortVideo,
+  Kind.Poll,
+];
 
 /** Reply-bearing kinds, added only for the feed that asks for replies. */
 const REPLY_KINDS: readonly number[] = [Kind.Comment];

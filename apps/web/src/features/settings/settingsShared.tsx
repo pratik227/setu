@@ -1,4 +1,4 @@
-import type { NostrEvent } from "@setu/protocol";
+import { type NostrEvent, replacesAppData } from "@setu/protocol";
 import { Button, cn, Separator, Spinner } from "@setu/ui";
 import { ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -54,6 +54,53 @@ export function useOwnReplaceable(kind: number): {
     event: rows[0]?.event,
     absenceConfirmed: waited && rows.length === 0,
   };
+}
+
+/**
+ * The same thing for an *addressable* kind, which needs the `d` tag in the filter.
+ *
+ * Not a parameter on `useOwnReplaceable`, because leaving the `#d` out is not a
+ * looser query — it asks for every kind-30078 the account has ever published, which
+ * is every application's private data, none of which we can read or should ask for.
+ * A separate function makes the identifier impossible to forget.
+ *
+ * Newest-wins is resolved here rather than trusted from the store: for an
+ * addressable kind the winner is the highest `created_at` and, on a tie, the lowest
+ * id (NIP-01). Picking the other one means editing a document the relays have
+ * already replaced.
+ */
+export function useOwnAddressable(
+  kind: number,
+  identifier: string,
+  limit: number,
+): { event: NostrEvent | undefined; absenceConfirmed: boolean } {
+  const { session } = useSession();
+  const pubkey = session?.pubkey;
+  const filter = useMemo(
+    () =>
+      pubkey
+        ? { kinds: [kind], authors: [pubkey], "#d": [identifier], limit }
+        : undefined,
+    [kind, pubkey, identifier, limit],
+  );
+  useSharedSubscription(filter);
+  const rows = useStoreEvents(filter ?? { ids: [], kinds: [], limit: 1 });
+
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setWaited(true), ABSENT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const newest = useMemo(() => {
+    let winner: NostrEvent | undefined;
+    for (const row of rows) {
+      if (replacesAppData(row.event, winner)) winner = row.event;
+    }
+    return winner;
+  }, [rows]);
+
+  return { event: newest, absenceConfirmed: waited && rows.length === 0 };
 }
 
 /** Copy for a refusal, so every section explains a blocked save the same way. */

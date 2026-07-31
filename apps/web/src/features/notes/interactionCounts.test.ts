@@ -1,3 +1,4 @@
+import { type MuteRules, muteRulesFrom, NO_MUTES } from "@setu/core";
 import { Kind, type NostrEvent } from "@setu/protocol";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,6 +6,7 @@ import {
   EMPTY_INTERACTIONS,
   INTERACTION_KINDS,
   interactionTargets,
+  mutedCountNotice,
   type NoteInteractions,
 } from "./interactionCounts";
 
@@ -204,5 +206,107 @@ describe("countInteractions — identity", () => {
     const shrunk = count(events, { noteIds: [NOTE_A], previous: grown });
     expect(shrunk).not.toBe(grown);
     expect([...shrunk.keys()]).toEqual([NOTE_A]);
+  });
+});
+
+describe("countInteractions with mutes", () => {
+  const MUTED = "m".repeat(64);
+  const counted = (
+    events: readonly NostrEvent[],
+    rules: MuteRules,
+    over: { viewerPubkey?: string; limit?: number } = {},
+  ) =>
+    countInteractions({
+      noteIds: [NOTE_A],
+      events,
+      ...(over.viewerPubkey ? { viewerPubkey: over.viewerPubkey } : {}),
+      limit: over.limit ?? 500,
+      muteRules: rules,
+      previous: new Map(),
+    }).get(NOTE_A);
+
+  it("leaves a muted author's reaction out of the total", () => {
+    const result = counted(
+      [event({ pubkey: OTHER }), event({ pubkey: MUTED })],
+      muteRulesFrom([["p", MUTED]]),
+    );
+    expect(result?.reactions).toBe(1);
+    expect(result?.mutedOut).toBe(1);
+  });
+
+  it("leaves a muted author's reply out of the reply count", () => {
+    const reply = (pubkey: string) =>
+      event({ kind: Kind.ShortTextNote, pubkey, content: "an answer" });
+    const result = counted(
+      [reply(OTHER), reply(MUTED)],
+      muteRulesFrom([["p", MUTED]]),
+    );
+    expect(result?.replies).toBe(1);
+    expect(result?.mutedOut).toBe(1);
+  });
+
+  it("applies word rules to replies, because a reply is prose", () => {
+    const result = counted(
+      [event({ kind: Kind.ShortTextNote, content: "free AIRDROP now" })],
+      muteRulesFrom([["word", "airdrop"]]),
+    );
+    expect(result?.replies).toBe(0);
+    expect(result?.mutedOut).toBe(1);
+  });
+
+  it("never applies word rules to reactions, so '+' cannot zero every like", () => {
+    const result = counted(
+      [event({ content: "+" })],
+      muteRulesFrom([["word", "+"]]),
+    );
+    expect(result?.reactions).toBe(1);
+    expect(result?.mutedOut).toBeUndefined();
+  });
+
+  it("keeps the viewer's own reaction even if the list somehow covers them", () => {
+    const result = counted(
+      [event({ pubkey: VIEWER })],
+      muteRulesFrom([["p", VIEWER]]),
+      { viewerPubkey: VIEWER },
+    );
+    expect(result?.reactions).toBe(1);
+    expect(result?.viewerReacted).toBe(true);
+  });
+
+  it("omits mutedOut entirely when nothing was removed", () => {
+    const result = counted([event()], muteRulesFrom([["p", MUTED]]));
+    expect(result?.mutedOut).toBeUndefined();
+  });
+
+  it("still marks a note approximate when every served interaction was muted", () => {
+    // `approximate` is a fact about what the *relay* held, so filtering must not
+    // turn a bounded page into an exact zero.
+    const events = [event({ pubkey: MUTED }), event({ pubkey: MUTED })];
+    const result = counted(events, muteRulesFrom([["p", MUTED]]), { limit: 2 });
+    expect(result?.reactions).toBe(0);
+    expect(result?.approximate).toBe(true);
+    expect(result?.mutedOut).toBe(2);
+  });
+
+  it("counts everything when the rule set is empty", () => {
+    expect(counted([event()], NO_MUTES)?.reactions).toBe(1);
+  });
+});
+
+describe("mutedCountNotice", () => {
+  it("says nothing when nothing was removed", () => {
+    expect(mutedCountNotice(EMPTY_INTERACTIONS)).toBeUndefined();
+  });
+
+  it("names the mute list as the reason the number is short", () => {
+    const notice = mutedCountNotice({ ...EMPTY_INTERACTIONS, mutedOut: 3 });
+    expect(notice).toContain("3 replies, reposts or reactions");
+    expect(notice).toContain("mute list");
+  });
+
+  it("reads as one thing in the singular", () => {
+    expect(mutedCountNotice({ ...EMPTY_INTERACTIONS, mutedOut: 1 })).toContain(
+      "1 reply, repost or reaction is",
+    );
   });
 });

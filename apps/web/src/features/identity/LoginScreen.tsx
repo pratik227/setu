@@ -1,3 +1,4 @@
+import { encodeNpub, truncateNpub } from "@setu/protocol";
 import {
   Button,
   cn,
@@ -10,34 +11,31 @@ import {
   Input,
   Label,
 } from "@setu/ui";
-import { Eye, KeyRound, Puzzle, ShieldCheck, Sparkles } from "lucide-react";
+import {
+  Eye,
+  KeyRound,
+  Lock,
+  Puzzle,
+  Radio,
+  ShieldCheck,
+  Sparkles,
+  TriangleAlert,
+  UserRound,
+} from "lucide-react";
 import { useCallback, useState } from "react";
+import { needsPassphrase } from "./accounts";
+import { AuthShell, Field } from "./authLayout";
+import { BunkerSignIn } from "./BunkerSignIn";
 import { useSession } from "./SessionProvider";
 
-type Mode = "choose" | "extension" | "key" | "create" | "readonly" | "backup";
-
-function Field({
-  label,
-  hint,
-  id,
-  ...props
-}: React.ComponentProps<"input"> & { label: string; hint?: string }) {
-  // A generated id rather than nesting the input inside the label: a `hint`
-  // sitting inside the label element would be read out as part of the label.
-  const fieldId = id ?? `field-${label.toLowerCase().replace(/\s+/g, "-")}`;
-  const hintId = hint ? `${fieldId}-hint` : undefined;
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={fieldId}>{label}</Label>
-      <Input id={fieldId} aria-describedby={hintId} {...props} />
-      {hint ? (
-        <p id={hintId} className="text-2xs text-muted-foreground">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
+type Mode =
+  | "choose"
+  | "extension"
+  | "key"
+  | "create"
+  | "readonly"
+  | "bunker"
+  | "backup";
 
 function Choice({
   icon,
@@ -84,6 +82,83 @@ function Choice({
   );
 }
 
+/**
+ * What the last sign-out could not remove from this device.
+ *
+ * Rendered here because this is where the person who needs it is looking. The
+ * cleanup outcome was reported by `SessionProvider` and displayed nowhere, which
+ * meant the one case worth telling a user about — "you signed out, and your notes,
+ * profile cache and private-message wraps are still on this computer" — was silently
+ * discarded. On a shared machine that is the difference between having handed the
+ * browser back safely and not.
+ *
+ * Only the `left-behind` case renders. A successful cleanup is what the user asked
+ * for and needs no receipt; announcing it would train them to ignore the box that
+ * matters.
+ */
+function LeftBehindNotice() {
+  const { lastSignOut } = useSession();
+  if (lastSignOut?.status !== "left-behind") return null;
+  return (
+    <div
+      role="status"
+      className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+    >
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+      <div className="min-w-0 space-y-1">
+        <p className="text-xs font-medium">Some data stayed on this device</p>
+        <p className="text-2xs text-muted-foreground">{lastSignOut.reason}</p>
+        <p className="text-2xs text-muted-foreground">
+          Closing every other Setu tab and signing out again usually finishes
+          the job. On a shared computer, clearing this site's data in your
+          browser settings removes it for certain.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Identities this device already knows, offered as a way straight back in.
+ *
+ * Two jobs. It is the escape hatch from "Add another account" — that step clears the
+ * active session so this screen can appear, and without a way back a user who changed
+ * their mind would have to set an identity up again. And on a cold start it is how a
+ * second account is reached at all, since only one session is restored.
+ *
+ * Deliberately no avatars or display names. With nobody signed in the store is
+ * in-memory (see `EngineProvider`), so there is no profile cache to read and fetching
+ * one would mean opening relay subscriptions from the login screen to render a
+ * decoration. An npub is honest and needs no network.
+ */
+function RememberedAccounts() {
+  const { accounts, switchAccount } = useSession();
+  if (accounts.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-2xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+        Continue as
+      </p>
+      {accounts.map((account) => {
+        const npub = encodeNpub(account.pubkey);
+        return (
+          <Choice
+            key={account.pubkey}
+            icon={needsPassphrase(account) ? <Lock /> : <UserRound />}
+            title={npub ? truncateNpub(npub, 10) : account.pubkey.slice(0, 16)}
+            description={
+              needsPassphrase(account)
+                ? "Saved here. Setu will ask for your passphrase before it can sign."
+                : "Saved on this device."
+            }
+            onClick={() => void switchAccount(account.pubkey)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function LoginScreen() {
   const {
     nip07Available,
@@ -115,7 +190,7 @@ export function LoginScreen() {
 
   if (mode === "backup" && newNsec) {
     return (
-      <Shell title="Save your key">
+      <AuthShell title="Save your key">
         <p className="text-xs text-muted-foreground">
           This is the only time Setu can show you this key. It is encrypted with
           your passphrase on this device — without both, nobody (including you)
@@ -142,13 +217,19 @@ export function LoginScreen() {
         >
           I have saved it
         </Button>
-      </Shell>
+      </AuthShell>
     );
+  }
+
+  if (mode === "bunker") {
+    return <BunkerSignIn onBack={() => setMode("choose")} />;
   }
 
   if (mode === "choose") {
     return (
-      <Shell title="Sign in to Setu">
+      <AuthShell title="Sign in to Setu">
+        <LeftBehindNotice />
+        <RememberedAccounts />
         <div className="space-y-2">
           <Choice
             icon={<Puzzle />}
@@ -161,6 +242,14 @@ export function LoginScreen() {
             recommended
             disabled={!nip07Available || busy}
             onClick={() => void run(signInWithExtension)}
+          />
+          <Choice
+            icon={<Radio />}
+            title="Remote signer"
+            description="Your key stays in a NIP-46 signer on another device."
+            recommended
+            disabled={busy}
+            onClick={() => setMode("bunker")}
           />
           <Choice
             icon={<KeyRound />}
@@ -185,13 +274,13 @@ export function LoginScreen() {
           />
         </div>
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      </Shell>
+      </AuthShell>
     );
   }
 
   if (mode === "key") {
     return (
-      <Shell title="Paste a private key" onBack={() => setMode("choose")}>
+      <AuthShell title="Paste a private key" onBack={() => setMode("choose")}>
         <Field
           label="Private key"
           type="password"
@@ -221,13 +310,13 @@ export function LoginScreen() {
           <ShieldCheck />
           Encrypt and sign in
         </Button>
-      </Shell>
+      </AuthShell>
     );
   }
 
   if (mode === "create") {
     return (
-      <Shell title="Create a new identity" onBack={() => setMode("choose")}>
+      <AuthShell title="Create a new identity" onBack={() => setMode("choose")}>
         <Field
           label="Passphrase"
           type="password"
@@ -252,12 +341,12 @@ export function LoginScreen() {
           <Sparkles />
           Generate keypair
         </Button>
-      </Shell>
+      </AuthShell>
     );
   }
 
   return (
-    <Shell title="Browse read-only" onBack={() => setMode("choose")}>
+    <AuthShell title="Browse read-only" onBack={() => setMode("choose")}>
       <Field
         label="Public key"
         autoComplete="off"
@@ -276,37 +365,7 @@ export function LoginScreen() {
         <Eye />
         Start browsing
       </Button>
-    </Shell>
-  );
-}
-
-function Shell({
-  title,
-  onBack,
-  children,
-}: {
-  title: string;
-  onBack?(): void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Setu verifies every event locally. Nothing is trusted because a
-            server said so.
-          </p>
-        </div>
-        {children}
-        {onBack ? (
-          <Button variant="ghost" size="sm" className="w-full" onClick={onBack}>
-            Back
-          </Button>
-        ) : null}
-      </div>
-    </div>
+    </AuthShell>
   );
 }
 
@@ -323,6 +382,12 @@ function Shell({
  * to read their own timeline would be worse than the strip was. Dismiss and carry
  * on reading; the way back in is the compose button, which is where the intent to
  * post actually starts.
+ *
+ * Three locked states, not one, because the remedies are different: an extension
+ * that is not answering, an encrypted key that needs its passphrase, and a remote
+ * signer whose connection key needs the same passphrase *and* whose signer has to be
+ * awake. The last one is why a failure here is not always "wrong passphrase" — see
+ * `submit`.
  */
 export interface UnlockDialogProps {
   open: boolean;
@@ -333,14 +398,25 @@ export function UnlockDialog({ open, onOpenChange }: UnlockDialogProps) {
   const { locked, unlock, signOut } = useSession();
   const [passphrase, setPassphrase] = useState("");
   const [failed, setFailed] = useState(false);
+  const [problem, setProblem] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
   if (!locked) return null;
 
   const isExtension = locked.kind === "nip07";
+  const isRemote = locked.kind === "nip46";
 
+  /*
+   * `false` means the passphrase was wrong. A thrown error means something else was.
+   *
+   * Kept separate deliberately. For a remote signer the common failure is a bunker
+   * that is offline or has revoked this connection, and reporting that as "that
+   * passphrase did not work" sends the user to retype a passphrase that was correct,
+   * over and over, while the actual problem is on their phone.
+   */
   const submit = () => {
     setBusy(true);
+    setProblem(undefined);
     void unlock(passphrase)
       .then((ok) => {
         setFailed(!ok);
@@ -351,6 +427,12 @@ export function UnlockDialog({ open, onOpenChange }: UnlockDialogProps) {
           onOpenChange(false);
         }
       })
+      .catch((cause: unknown) => {
+        setFailed(false);
+        setProblem(
+          cause instanceof Error ? cause.message : "that did not work",
+        );
+      })
       .finally(() => setBusy(false));
   };
 
@@ -359,21 +441,33 @@ export function UnlockDialog({ open, onOpenChange }: UnlockDialogProps) {
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>
-            {isExtension ? "Extension not responding" : "Unlock to post"}
+            {isExtension
+              ? "Extension not responding"
+              : isRemote
+                ? "Reconnect your signer"
+                : "Unlock to post"}
           </DialogTitle>
           <DialogDescription>
             {isExtension
               ? "Reading works without it. Signing a note needs your extension to answer."
-              : "Your key is stored encrypted on this device. Setu needs the passphrase to sign, and never to read."}
+              : isRemote
+                ? "Setu keeps this connection encrypted on this device, so it asks for your passphrase and then checks that your signer is awake."
+                : "Your key is stored encrypted on this device. Setu needs the passphrase to sign, and never to read."}
           </DialogDescription>
         </DialogHeader>
 
         {isExtension ? (
-          <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs">
-            <Puzzle className="size-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1">
-              Check that the extension is enabled for this site, then try again.
-            </span>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs">
+              <Puzzle className="size-4 shrink-0 text-muted-foreground" />
+              <span className="flex-1">
+                Check that the extension is enabled for this site and set to
+                this account, then try again.
+              </span>
+            </div>
+            {problem ? (
+              <p className="text-xs text-destructive">{problem}</p>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -388,18 +482,23 @@ export function UnlockDialog({ open, onOpenChange }: UnlockDialogProps) {
               onChange={(e) => {
                 setPassphrase(e.target.value);
                 setFailed(false);
+                setProblem(undefined);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && passphrase && !busy) submit();
               }}
               id="unlock-passphrase"
               aria-invalid={failed || undefined}
-              aria-describedby={failed ? "unlock-error" : undefined}
+              aria-describedby={failed || problem ? "unlock-error" : undefined}
               className={failed ? "border-destructive" : undefined}
             />
             {failed ? (
               <p id="unlock-error" className="text-xs text-destructive">
                 That passphrase did not work.
+              </p>
+            ) : problem ? (
+              <p id="unlock-error" className="text-xs text-destructive">
+                {problem}
               </p>
             ) : null}
           </div>
@@ -410,12 +509,21 @@ export function UnlockDialog({ open, onOpenChange }: UnlockDialogProps) {
             Sign out
           </Button>
           {isExtension ? (
-            <Button disabled={busy} onClick={() => void unlock("")}>
+            // Through `submit` rather than calling `unlock` directly, so the "your
+            // extension is set to a different account" refusal is displayed instead
+            // of becoming an unhandled rejection and a button that does nothing.
+            <Button disabled={busy} onClick={submit}>
               Try again
             </Button>
           ) : (
             <Button disabled={busy || !passphrase} onClick={submit}>
-              {busy ? "Unlocking…" : "Unlock"}
+              {busy
+                ? isRemote
+                  ? "Reconnecting…"
+                  : "Unlocking…"
+                : isRemote
+                  ? "Reconnect"
+                  : "Unlock"}
             </Button>
           )}
         </DialogFooter>

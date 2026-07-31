@@ -1,12 +1,15 @@
 import {
   type ContentToken,
+  emojiTagMap,
   encodeNpub,
   type Nip19Ref,
+  quotedEventIds,
   tokenizeContent,
   truncateNpub,
 } from "@setu/protocol";
 import { cn } from "@setu/ui";
 import { Fragment, useMemo } from "react";
+import { EmojiText } from "./CustomEmoji";
 import type { MediaView } from "./types";
 
 /**
@@ -94,11 +97,14 @@ export function quoteReference(entity: Nip19Ref): QuoteReference | undefined {
 
 function TokenView({
   token,
+  emoji,
   onOpenHashtag,
   onOpenMention,
   renderQuote,
 }: BodyHandlers & {
   token: ContentToken;
+  /** NIP-30 `shortcode -> URL`, empty for the overwhelming majority of notes. */
+  emoji: ReadonlyMap<string, string>;
   renderQuote?(
     reference: QuoteReference,
     handlers: BodyHandlers,
@@ -106,7 +112,11 @@ function TokenView({
 }) {
   switch (token.type) {
     case "text":
-      return <>{token.value}</>;
+      // Only `text` gets shortcode substitution. A `:shortcode:` inside a fenced
+      // code block or a URL path is characters the author meant literally, and the
+      // tokenizer has already separated those out — which is why the substitution
+      // happens here rather than over the whole string before tokenizing.
+      return <EmojiText text={token.value} emoji={emoji} />;
 
     case "newline":
       return <>{token.value}</>;
@@ -214,6 +224,40 @@ export interface NoteBodyOptions extends BodyHandlers {
   ): React.ReactNode;
 }
 
+/** Shared empty map, so a note with no `emoji` tags allocates nothing. */
+const NO_EMOJI: ReadonlyMap<string, string> = new Map();
+
+/**
+ * Tag-only quotes one note may expand.
+ *
+ * A cap, because the tag list is author-controlled and unbounded: a note carrying
+ * two hundred `q` tags would mount two hundred quote cards, each of which registers
+ * an id with the quote tracker and fetches an event. That is one row turning into a
+ * page-long wall and a filter the tracker's own cap then has to evict from.
+ *
+ * Two is what an honest quote repost needs — the shape NIP-18 describes has exactly
+ * one — and the surplus is not dropped silently: `quotedEventIds` order is tag
+ * order, so the first ones are the ones the author wrote first.
+ */
+const MAX_TAG_QUOTES = 2;
+
+/**
+ * Event ids the content already renders as an embedded quote.
+ *
+ * The set `q` tags are checked against. NIP-18 says a quote repost carries both an
+ * inline `nostr:nevent…` reference *and* a `q` tag naming the same event, so
+ * rendering both would show the quoted note twice in one row.
+ */
+function inlineQuotedIds(tokens: readonly ContentToken[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const token of tokens) {
+    if (token.type !== "mention") continue;
+    const reference = quoteReference(token.entity);
+    if (reference) ids.add(reference.id);
+  }
+  return ids;
+}
+
 /** Tokenize once, then render. Returns the body and the hoisted media list. */
 export function useRenderedBody({
   content,
@@ -224,6 +268,7 @@ export function useRenderedBody({
 }: NoteBodyOptions): RenderedContent {
   return useMemo(() => {
     const tokens = tokenizeContent(content, tags);
+    const emoji = tags ? emojiTagMap({ tags }) : NO_EMOJI;
 
     const media: MediaView[] = tokens
       .filter(
@@ -231,6 +276,23 @@ export function useRenderedBody({
           t.type === "image" || t.type === "video",
       )
       .map((t) => ({ url: t.url, kind: t.type }));
+
+    /*
+     * Quote reposts whose reference exists only as a `q` tag.
+     *
+     * Not a rare shape: plenty of clients write the tag and leave the content as
+     * the author's own commentary, with no `nostr:` URI in it at all. Rendering
+     * only inline references makes every one of those quotes invisible — the row
+     * shows a remark about a note the reader is never shown, which reads as a
+     * non-sequitur rather than as a missing embed.
+     */
+    const inline = inlineQuotedIds(tokens);
+    const tagged =
+      tags && renderQuote
+        ? quotedEventIds({ tags })
+            .filter((id) => !inline.has(id))
+            .slice(0, MAX_TAG_QUOTES)
+        : [];
 
     const body = (
       <>
@@ -242,10 +304,16 @@ export function useRenderedBody({
           <Fragment key={`${token.type}-${i}`}>
             <TokenView
               token={token}
+              emoji={emoji}
               onOpenHashtag={onOpenHashtag}
               onOpenMention={onOpenMention}
               {...(renderQuote ? { renderQuote } : {})}
             />
+          </Fragment>
+        ))}
+        {tagged.map((id) => (
+          <Fragment key={`q-${id}`}>
+            {renderQuote?.({ id }, { onOpenHashtag, onOpenMention })}
           </Fragment>
         ))}
       </>

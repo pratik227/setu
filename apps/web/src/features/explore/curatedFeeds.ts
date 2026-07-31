@@ -79,6 +79,35 @@ export function curatedFeeds(
       definition: { kinds: [Kind.FileMetadata], relays },
     },
     {
+      id: "pictures",
+      name: "Pictures",
+      // Named for the kind rather than for a mood. "Photography" would be a claim
+      // about what is in these posts; kind 20 is a claim about their structure,
+      // which is the only one the filter can actually make.
+      description:
+        "NIP-68 picture posts (kind 20) — the image is the post, not an attachment.",
+      icon: "media" as FeedIconKey,
+      definition: { kinds: [Kind.Picture], relays },
+    },
+    {
+      id: "video",
+      name: "Video",
+      description:
+        "NIP-71 video events (kinds 21 and 22), landscape and short-form together.",
+      icon: "media" as FeedIconKey,
+      definition: { kinds: [Kind.Video, Kind.ShortVideo], relays },
+    },
+    {
+      id: "polls",
+      name: "Polls",
+      // No "most answered" ordering, for the reason `pollViews.ts` sets out: the
+      // responses we hold are a sample, so ranking by them would rank by which
+      // polls our own relays happened to carry votes for.
+      description: "NIP-88 polls (kind 1068), newest first.",
+      icon: "highlight" as FeedIconKey,
+      definition: { kinds: [Kind.Poll], relays },
+    },
+    {
       id: "highlights",
       name: "Highlights",
       description: "NIP-84 highlights (kind 9802) — passages people marked.",
