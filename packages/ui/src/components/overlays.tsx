@@ -60,34 +60,53 @@ export function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay />
-      <DialogPrimitive.Content
-        className={cn(
-          "motion-dialog fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-          // `w-[calc(100vw-2rem)]` rather than a percentage: it guarantees a
-          // gutter on a narrow viewport instead of scaling one.
-          "grid w-[calc(100vw-2rem)] max-w-2xl gap-4",
-          "rounded-2xl bg-background p-6 shadow-2xl outline-hidden",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {hideClose ? null : (
-          <DialogPrimitive.Close
-            aria-label="Close"
-            className={cn(
-              "absolute top-4 right-4 flex size-8 items-center justify-center",
-              "rounded-md text-muted-foreground transition-colors",
-              "duration-(--motion-duration-instant)",
-              "hover:bg-accent hover:text-accent-foreground",
-              "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden",
-              "[&_svg]:size-4",
-            )}
-          >
-            <X />
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
+      {/*
+       * Centred by a grid parent, not by `-translate-x-1/2 -translate-y-1/2` on
+       * the panel itself.
+       *
+       * The panel carries `motion-dialog`, whose keyframes animate `transform`
+       * with `animation-fill-mode: both`. A filled animation keeps its final
+       * keyframe applied after it ends, and an animation beats a normal
+       * declaration in the cascade — so `transform: translateY(0) scale(1)` won
+       * permanently and silently discarded the centring translate, leaving every
+       * dialog offset down and right by half its own size once it had finished
+       * opening. Keeping the centring off `transform` entirely means the two
+       * cannot fight.
+       *
+       * The wrapper is `pointer-events-none` so it does not swallow clicks meant
+       * for the overlay behind it (that is what dismiss-on-click-outside needs);
+       * the panel re-enables them for itself.
+       */}
+      <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center p-4">
+        <DialogPrimitive.Content
+          className={cn(
+            "motion-dialog pointer-events-auto",
+            // `w-full` inside a padded grid cell rather than `100vw - 2rem`:
+            // the gutter is the parent's padding, so it cannot disagree with it.
+            "grid w-full max-w-2xl gap-4",
+            "rounded-2xl bg-background p-6 shadow-2xl outline-hidden",
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          {hideClose ? null : (
+            <DialogPrimitive.Close
+              aria-label="Close"
+              className={cn(
+                "absolute top-4 right-4 flex size-8 items-center justify-center",
+                "rounded-md text-muted-foreground transition-colors",
+                "duration-(--motion-duration-instant)",
+                "hover:bg-accent hover:text-accent-foreground",
+                "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden",
+                "[&_svg]:size-4",
+              )}
+            >
+              <X />
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Content>
+      </div>
     </DialogPrimitive.Portal>
   );
 }

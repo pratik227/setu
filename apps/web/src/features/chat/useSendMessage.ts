@@ -1,27 +1,41 @@
+import type { StoredEvent } from "@setu/core";
 import {
   buildChatMessage,
   deliveryTargets,
   giftWrap,
   type Hex32,
   Kind,
-  parseDmRelayList,
+  type NostrEvent,
 } from "@setu/protocol";
 import { useCallback, useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
+import { REPLACEABLE_LIST_LIMIT } from "../../engine/queryLimits";
 import { useSession } from "../identity/SessionProvider";
+import {
+  type DmDeliveryPlan,
+  newestDmRelayLists,
+  planDmDelivery,
+  undeliverableMessage,
+} from "./dmDelivery";
+import { configuredRelaysConnected } from "./inboxRelays";
 
 /**
  * Sending a private message.
  *
  * The delivery rule is the part with teeth. NIP-17 says a recipient publishes a
  * kind-10050 naming the relays where they want private mail, and that list is
- * *not* their NIP-65 read list. Two consequences this hook enforces:
+ * *not* their NIP-65 read list. Three consequences this hook enforces:
  *
  *  - **No fallback to the public relay set.** If someone has published no kind-10050
  *    we cannot deliver to them, and we say so. Guessing means depositing an
  *    encrypted envelope addressed to them on relays of *our* choosing, where it
  *    will sit undelivered and still tell an observer that someone messaged that
  *    pubkey.
+ *  - **The inbox lists are read from the network, not just the store.** This hook
+ *    used to answer the question from a local `store.query` alone. Nothing filled
+ *    that store for anyone but the signed-in account, so every recipient looked
+ *    inboxless and no message could ever be sent. A store read that races a fetch
+ *    nobody started is not a lookup.
  *  - **Our own copy goes to our own DM relays.** A gift wrap is encrypted to exactly
  *    one key, so the sender's copy is a separate wrap that has to be delivered
  *    somewhere the sender will actually read.
@@ -30,6 +44,15 @@ import { useSession } from "../identity/SessionProvider";
  * Broadcasting every wrap to every relay would undo the addressing that keeps a
  * conversation's participants apart on the wire.
  */
+
+/**
+ * How long to wait for relays to answer with the recipients' inbox lists.
+ *
+ * A timeout is not an answer: it leaves `absenceConfirmed` false, so the send is
+ * refused as "could not confirm" rather than as "they have no inbox". See
+ * `dmDelivery.ts`.
+ */
+const RESOLVE_TIMEOUT_MS = 6000;
 
 export type SendState =
   | { readonly status: "idle" }
@@ -54,15 +77,70 @@ export function useSendMessage(): SendMessageApi {
   const { session } = useSession();
   const [state, setState] = useState<SendState>({ status: "idle" });
 
-  /** A participant's DM relays, or an empty list if they published none. */
-  const dmRelaysFor = useCallback(
-    async (pubkey: Hex32): Promise<readonly string[]> => {
-      const rows = await engine.store.query({
+  /**
+   * Where each target wants their mail, asked of the relays and then decided.
+   *
+   * The fetch is not an optimisation, it is the answer: the chat list's
+   * subscription (`useDmRelayLists`) may already have it, but a conversation
+   * opened from a profile has no such history, and a first message must not fail
+   * because we never asked.
+   */
+  const resolveRoutes = useCallback(
+    async (targets: readonly Hex32[]): Promise<DmDeliveryPlan> => {
+      const filter = {
         kinds: [Kind.DirectMessageRelays],
-        authors: [pubkey],
-        limit: 4,
+        authors: [...targets],
+        limit: REPLACEABLE_LIST_LIMIT * targets.length,
+      };
+
+      let fetched: readonly NostrEvent[] = [];
+      let completed = true;
+      try {
+        fetched = await Promise.race([
+          engine.subscriptions.fetch({
+            filters: engine.relays.map((relay) => ({ relay, filter })),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("timed out")),
+              RESOLVE_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      } catch {
+        // A slow relay must never become an accusation. `completed` stays false,
+        // which keeps `absenceConfirmed` false, which makes this a "could not
+        // check" refusal rather than "they published no inbox".
+        completed = false;
+      }
+
+      // Read the store too, and unconditionally: the race above discards the
+      // fetch's own local half on timeout, and a list the chat list's
+      // subscription already delivered is a perfectly good answer that would
+      // otherwise be thrown away with it.
+      const stored: readonly StoredEvent[] = await engine.store
+        .query(filter)
+        .catch(() => []);
+
+      // A relay that never connected has not answered. Same rule as the bookmark
+      // list's absence check: a partial result and a real absence are identical
+      // from the replies alone. Checked per configured relay, not by counting
+      // connections — the pool also holds sockets to the inbox relays the chat
+      // screen reads wraps from, which this REQ never went to, so a count would
+      // exceed the configured set and no absence would ever be confirmed.
+      const answered = configuredRelaysConnected(
+        engine.pool.health(),
+        engine.relays,
+      );
+
+      return planDmDelivery({
+        targets,
+        lists: newestDmRelayLists([
+          ...fetched,
+          ...stored.map((row) => row.event),
+        ]),
+        absenceConfirmed: completed && answered,
       });
-      return parseDmRelayList(rows[0]?.event);
     },
     [engine],
   );
@@ -91,25 +169,22 @@ export function useSendMessage(): SendMessageApi {
 
       setState({ status: "sending" });
       try {
-        // Where each recipient wants their mail, resolved before anything is
-        // built, so a missing list fails before we encrypt rather than after.
-        const routes = new Map<Hex32, readonly string[]>();
-        const unreachable: Hex32[] = [];
-        for (const recipient of recipients) {
-          const relays = await dmRelaysFor(recipient);
-          if (relays.length === 0) unreachable.push(recipient);
-          else routes.set(recipient, relays);
-        }
-        if (unreachable.length > 0) {
+        // Resolved before anything is built, so an undeliverable message fails
+        // before we encrypt rather than after — and resolved against the network,
+        // so "no inbox" is a finding rather than the default.
+        const plan = await resolveRoutes(recipients);
+        if (!plan.ok) {
           setState({
             status: "error",
-            message:
-              unreachable.includes(author) && unreachable.length === 1
-                ? "You have not chosen where to receive private messages, so your own copy cannot be delivered. Set your message relays in Settings."
-                : `${unreachable.length === 1 ? "That person has" : `${unreachable.length} people have`} not published where to receive private messages, so Setu cannot deliver to them.`,
+            message: undeliverableMessage({
+              author,
+              noInbox: plan.noInbox,
+              unconfirmed: plan.unconfirmed,
+            }),
           });
           return false;
         }
+        const routes = plan.routes;
 
         const template = buildChatMessage({
           content,
@@ -158,7 +233,7 @@ export function useSendMessage(): SendMessageApi {
         return false;
       }
     },
-    [engine, session, dmRelaysFor],
+    [engine, session, resolveRoutes],
   );
 
   const reset = useCallback(() => setState({ status: "idle" }), []);

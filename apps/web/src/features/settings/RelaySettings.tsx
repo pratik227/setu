@@ -177,7 +177,7 @@ export function RelaySection() {
                       <p className="mt-1.5 text-2xs text-muted-foreground">
                         {gate === "payment-required"
                           ? "This relay answers queries with silence until you have a paid account, which looks the same as an empty network."
-                          : "This relay needs NIP-42 login, which Setu does not support yet, so it will return nothing."}
+                          : "This relay needs NIP-42 login. Setu answers the challenge for relays it is connected to when your session can sign; a read-only session will get nothing from it."}
                       </p>
                     ) : null}
                   </li>
@@ -224,6 +224,35 @@ export function RelaySection() {
   );
 }
 
+/**
+ * A starting inbox set, offered when the account has none.
+ *
+ * A new account publishes no kind-10050, and the consequence is not obvious from
+ * the UI: nobody can send them a private message at all, and their own sent copies
+ * have nowhere to go either, because a sender that guesses a relay is a sender
+ * leaking who was messaged. So the empty state offers an answer rather than only
+ * describing the problem — filled into the draft, never published, because which
+ * relays hold your private mail is not a decision a client gets to make for you.
+ *
+ * Why these three, and why three:
+ *
+ *  - `auth.nostr1.com` exists to be a DM inbox and sets `auth_required: true`, so
+ *    it will not hand your gift wraps to anyone who asks. That used to disqualify
+ *    it — a relay that answers with silence looks like an empty network — but
+ *    NIP-42 AUTH is implemented now, so it is usable.
+ *  - `nos.lol` and `offchain.pub` are free, open and general purpose, and accept
+ *    gift wraps. They are the hedge: a sender whose client cannot authenticate
+ *    still has somewhere to deliver, and one accepted relay is enough.
+ *
+ * Short on purpose. Every relay in this list is another copy of every envelope
+ * addressed to you, held by another operator.
+ */
+const SUGGESTED_DM_RELAYS = [
+  "wss://auth.nostr1.com",
+  "wss://nos.lol",
+  "wss://offchain.pub",
+] as const;
+
 export function DmRelaySection() {
   const { publish, state } = usePublish();
   const { event, absenceConfirmed } = useOwnReplaceable(
@@ -267,7 +296,9 @@ export function DmRelaySection() {
         <p className="text-xs text-muted-foreground">
           Where you receive private messages (NIP-17). Kept separate from the
           list above on purpose — where you read public notes and where you want
-          private mail delivered are different questions.
+          private mail delivered are different questions. Senders deliver only
+          to this list, so Setu reads your messages from it as well as from the
+          relays above, and logs in (NIP-42) to the ones that ask.
         </p>
 
         {draft === undefined ? (
@@ -278,11 +309,32 @@ export function DmRelaySection() {
         ) : (
           <>
             {draft.length === 0 ? (
-              <p className="rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs">
-                You have not published any message relays, so nobody can send
-                you a private message — a sender has nowhere to deliver to, and
-                Setu will not guess on their behalf.
-              </p>
+              <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs">
+                <p>
+                  You have not published any message relays, so nobody can send
+                  you a private message — a sender has nowhere to deliver to,
+                  and Setu will not guess on their behalf. Your own copies of
+                  messages you send have nowhere to go either.
+                </p>
+                <p className="text-muted-foreground">
+                  A starting set: <span className="setu-mono">nos.lol</span> and{" "}
+                  <span className="setu-mono">offchain.pub</span> are free and
+                  open, and <span className="setu-mono">auth.nostr1.com</span>{" "}
+                  is built to be a message inbox — it requires NIP-42 login,
+                  which Setu implements, so it will not hand your messages to
+                  whoever asks. Nothing is published until you press Save.
+                </p>
+                <div className="flex justify-start">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDraft([...SUGGESTED_DM_RELAYS])}
+                  >
+                    <Plus />
+                    Use suggested relays
+                  </Button>
+                </div>
+              </div>
             ) : (
               <ul className="flex flex-col gap-1.5">
                 {draft.map((url, index) => (

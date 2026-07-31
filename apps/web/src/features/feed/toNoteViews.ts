@@ -5,7 +5,8 @@ import {
   EMPTY_INTERACTIONS,
   type NoteInteractions,
 } from "../notes/interactionCounts";
-import type { AuthorView, NoteView } from "../notes/types";
+import { noteMediaViews } from "../notes/noteMediaViews";
+import type { AuthorView, MediaView, NoteView } from "../notes/types";
 import { fallbackAuthor } from "../profiles/useAuthors";
 
 /**
@@ -40,8 +41,11 @@ function sameAuthor(a: AuthorView, b: AuthorView): boolean {
 /**
  * Is this view identical, field for field, to the one we built last tick?
  *
- * Shallow on the scalars, by-value on the author. Deeper than that is not worth
- * paying for: `media` is derived from `content`, which is already compared.
+ * Shallow on the scalars, by-value on the author. `media` is still compared by
+ * reference, and that is sound rather than lucky: it is derived from the event,
+ * which is immutable, so `mediaFor` below hands back the previous array whenever
+ * the row still shows the same note. Building a fresh array here and comparing it
+ * by reference would mark every media row changed on every tick.
  */
 function sameView(a: NoteView, b: NoteView): boolean {
   return (
@@ -67,6 +71,34 @@ function sameView(a: NoteView, b: NoteView): boolean {
       return other !== undefined && sameAuthor(r, other);
     })
   );
+}
+
+/**
+ * The row's media, reusing the previous array whenever the row still shows the
+ * same note.
+ *
+ * Both halves matter. Deriving media here rather than from the rendered body is
+ * what gets the author's declared `imeta` dimensions onto the view model, which is
+ * the only way a row can reserve an image's box before it loads. Reusing the
+ * previous array is what keeps that from costing the row's memoisation: events are
+ * immutable, so identical `id` and `content` means identical media, and handing
+ * back the same array lets `sameView` keep comparing `media` by reference.
+ *
+ * Tokenizing the content is the expensive part, and this is what confines it to
+ * rows that are actually new — not to every row on every store tick.
+ */
+function mediaFor(
+  source: NostrEvent,
+  earlier: NoteView | undefined,
+): readonly MediaView[] | undefined {
+  if (
+    earlier !== undefined &&
+    earlier.id === source.id &&
+    earlier.content === source.content
+  ) {
+    return earlier.media;
+  }
+  return noteMediaViews(source);
 }
 
 /**
@@ -108,6 +140,9 @@ export function toNoteViews(
       (pubkey) => authors.get(pubkey) ?? fallbackAuthor(pubkey),
     );
 
+    const earlier = before.get(entry.key);
+    const media = mediaFor(source, earlier);
+
     const built: NoteView = {
       id: source.id,
       // The entry's key, not the note's id: a reposted note also appears on its
@@ -122,6 +157,7 @@ export function toNoteViews(
       zapSats: counts.zapSats,
       viewerReacted: counts.viewerReacted,
       viewerReposted: counts.viewerReposted,
+      ...(media ? { media } : {}),
       ...(counts.approximate ? { countsApproximate: true } : {}),
       ...(reposters.length > 0 ? { repostedBy: reposters } : {}),
       ...(hasWarning
@@ -145,7 +181,6 @@ export function toNoteViews(
     // Keep the previous object when nothing about the row changed, so a memoised
     // row can skip re-rendering. A tick that only resolved one author's name
     // should re-render one row, not the whole page.
-    const earlier = before.get(built.rowKey);
     views.push(
       earlier !== undefined && sameView(earlier, built) ? earlier : built,
     );

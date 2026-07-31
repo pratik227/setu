@@ -34,6 +34,8 @@ import {
   mergeProvenance,
   shouldReplace,
 } from "./replaceable";
+import type { EvictingEventStore, RetentionPolicy } from "./retention";
+import { isEvictable } from "./retention";
 import type { EventRow } from "./rows";
 import { rowToEvent, rowToStored, toRow } from "./rows";
 import type { TombstoneRecord } from "./tombstones";
@@ -105,7 +107,7 @@ class SetuDatabase extends Dexie {
 }
 
 /** IndexedDB-backed event store. */
-export class DexieEventStore implements EventStore {
+export class DexieEventStore implements EventStore, EvictingEventStore {
   private readonly db: SetuDatabase;
   private readonly tombstones = new TombstoneIndex();
   private readonly observers: ObserverRegistry;
@@ -256,6 +258,43 @@ export class DexieEventStore implements EventStore {
       const removed = await this.enqueue(() => this.sweepInternal(this.now()));
       this.observers.notify(removed);
       return removed.length;
+    });
+  }
+
+  /**
+   * Deletes old, re-fetchable rows under `policy`, returning how many went.
+   *
+   * The bounded read is the point: candidates come from the `created_at` index
+   * below the cutoff and are capped at `policy.maxPerSweep`, so a store holding a
+   * year of history does not load a year of history into memory to prune a day of
+   * it. Sweeps repeat, so a backlog drains across several of them.
+   *
+   * `created_at` is only the *candidate* filter — {@link isEvictable} makes the
+   * decision, and it also requires that we have held the row for the full horizon.
+   * An event authored three years ago can have arrived a minute ago and be on
+   * screen right now.
+   */
+  async evictStale(policy: RetentionPolicy): Promise<number> {
+    return this.observers.runBatch(async () => {
+      const evicted = await this.enqueue(async () => {
+        const cutoff = this.now() - policy.maxAgeSeconds;
+        const rows = await this.db.events
+          .where("created_at")
+          .below(cutoff)
+          .limit(policy.maxPerSweep)
+          .toArray();
+        const doomed = rows.filter((row) =>
+          isEvictable(rowToStored(row), cutoff, policy),
+        );
+        if (doomed.length > 0) {
+          await this.db.events.bulkDelete(doomed.map((row) => row.id));
+        }
+        return doomed.map(rowToEvent);
+      });
+      // Observers are woken with the deleted events, so a view showing one is
+      // told it is gone instead of rendering a row no read can return.
+      this.observers.notify(evicted);
+      return evicted.length;
     });
   }
 

@@ -48,6 +48,31 @@ export function loadReadMarks(
   }
 }
 
+/**
+ * Forget an account's read marks entirely, for sign-out.
+ *
+ * These are not innocuous leftovers: the keys are conversation ids, and a
+ * conversation id names its participants. Left on a shared device they say who the
+ * previous user was messaging and when they last read it — the same metadata the
+ * gift wrap exists to withhold from a relay, handed instead to the next person to
+ * open the browser. Removed rather than overwritten with `{}`, so nothing remains to
+ * attribute to a pubkey at all.
+ */
+export function clearReadMarks(
+  pubkey: string | undefined,
+  storage: Storage | undefined = typeof localStorage === "undefined"
+    ? undefined
+    : localStorage,
+): void {
+  if (!pubkey || !storage) return;
+  try {
+    storage.removeItem(readMarksKey(pubkey));
+  } catch {
+    // Storage disabled or blocked by policy. Reported by the caller as data left
+    // behind; there is nothing further this function can do about it.
+  }
+}
+
 /** Persist read marks. Failure is silent: it costs a mark, not the app. */
 export function saveReadMarks(
   pubkey: string | undefined,

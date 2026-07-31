@@ -1,5 +1,5 @@
 /**
- * One object a note row can act through, assembled from the four action hooks.
+ * What a note row can act through, assembled from the four action hooks.
  *
  * The rows themselves take view models, not events — that is what keeps rendering
  * free of store access. But every write needs the actual event: a reaction tags
@@ -11,6 +11,28 @@
  * merged into one answer per row, which is what lets the row show exactly one
  * spinner and one message without knowing that reactions, bookmarks and zaps are
  * three different subsystems.
+ *
+ * ## Two returns, not one
+ *
+ * The capabilities and the transient state are handed back separately because
+ * they change on completely different clocks, and merging them cost the feed its
+ * row memoisation entirely. Measured on a live timeline: with `pendingFor`,
+ * `noticeFor` and `errorFor` on the same object, that object had a new identity on
+ * every single render — 1558 `actions` prop changes across 1558 row renders — so
+ * every row on screen re-rendered on every tick whether or not the memo was there.
+ *
+ * `actions` is now reference-stable for the life of a surface, and `statuses` is
+ * sparse: only the rows with something in flight appear in it, so a spinner on one
+ * row leaves the other eighty rows' props untouched.
+ *
+ * ## Why mute and report are rendered, not fired
+ *
+ * The two moderation actions hand back a *dialog* rather than performing a write, and
+ * that is what keeps them out of `statuses` entirely: their in-flight and failure
+ * state lives in the dialog that owns the edit, so adding them cost this object
+ * nothing. Both also need a confirmation step for reasons that are about honesty
+ * rather than caution — a mute is not a block, and a report moderates nothing — and
+ * that copy belongs next to the button, not in a toast.
  */
 
 import type { NostrEvent } from "@setu/protocol";
@@ -18,18 +40,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
 import { Composer } from "../compose/Composer";
 import { useSession } from "../identity/SessionProvider";
-import type { NoteActionControl, NoteRowActions } from "./NoteActionRow";
+import { MuteDialog } from "../moderation/MuteDialog";
+import { ReportDialog } from "../moderation/ReportDialog";
+import { useMuteRules } from "../moderation/useMuteList";
+import type { NoteRowActions, NoteRowStatus } from "./NoteActionRow";
 import { copyMessage, copyText, noteReference } from "./noteLink";
+import { noteRowStatuses } from "./noteRowStatus";
 import { useBookmarks } from "./useBookmarks";
-import { slotOf, useNoteActions } from "./useNoteActions";
+import { useNoteActions } from "./useNoteActions";
 import { useZap } from "./useZap";
 
 /** How long a "Link copied" style confirmation stays on screen. */
 const NOTICE_MS = 4000;
 
+export interface NoteRowActionsApi {
+  /** Stable for the life of the surface, so a memoised row can skip on it. */
+  readonly actions: NoteRowActions;
+  /**
+   * Keyed by note id, and holding only the rows that have something to report.
+   * A row missing from the map has nothing in flight.
+   */
+  readonly statuses: ReadonlyMap<string, NoteRowStatus>;
+}
+
 export function useNoteRowActions(
   events: ReadonlyMap<string, NostrEvent>,
-): NoteRowActions {
+): NoteRowActionsApi {
   /*
    * The events map is read through a ref, not closed over.
    *
@@ -48,6 +84,39 @@ export function useNoteRowActions(
   const noteActions = useNoteActions();
   const bookmarks = useBookmarks();
   const zapping = useZap();
+  /*
+   * Read half only. `rules` holds one identity for as long as the list is
+   * unchanged (see the projection memo in `useMuteList`), which is what lets
+   * `isAuthorMuted` — and therefore the whole `actions` object — keep its identity
+   * while the store re-emits the mute list on every tick. Muting someone does give
+   * `actions` a new identity and re-render the rows once, which is correct: the
+   * menu's wording and the feed's contents both change.
+   */
+  const { rules: muteRules } = useMuteRules();
+
+  /*
+   * Depended on member by member, never on the hook objects.
+   *
+   * All three hooks return a fresh object literal every render while the
+   * callbacks inside it are memoised. Listing `noteActions` as a dependency
+   * therefore rebuilt `react`, `repost` and `deleteNote` on every render for no
+   * reason at all — which is most of why the assembled object never held an
+   * identity, and so why the feed's rows could not be memoised.
+   */
+  const {
+    react: publishReaction,
+    unreact,
+    repost: publishRepost,
+    unrepost,
+    deleteNote: publishDeletion,
+    states: actionStates,
+  } = noteActions;
+  const {
+    toggle: toggleBookmark,
+    isBookmarked,
+    state: bookmarkState,
+  } = bookmarks;
+  const { zap: startZap, states: zapStates } = zapping;
 
   const [notices, setNotices] = useState<ReadonlyMap<string, string>>(
     new Map(),
@@ -87,36 +156,36 @@ export function useNoteRowActions(
     (noteId: string, active: boolean) => {
       const event = eventsRef.current.get(noteId);
       if (!event) return;
-      void (active ? noteActions.unreact(event) : noteActions.react(event));
+      void (active ? unreact(event) : publishReaction(event));
     },
-    [noteActions],
+    [publishReaction, unreact],
   );
 
   const repost = useCallback(
     (noteId: string, active: boolean) => {
       const event = eventsRef.current.get(noteId);
       if (!event) return;
-      void (active ? noteActions.unrepost(event) : noteActions.repost(event));
+      void (active ? unrepost(event) : publishRepost(event));
     },
-    [noteActions],
+    [publishRepost, unrepost],
   );
 
   const bookmark = useCallback(
     (noteId: string) => {
       const event = eventsRef.current.get(noteId);
       if (!event) return;
-      void bookmarks.toggle(event);
+      void toggleBookmark(event);
     },
-    [bookmarks],
+    [toggleBookmark],
   );
 
   const zap = useCallback(
     (noteId: string) => {
       const event = eventsRef.current.get(noteId);
       if (!event) return;
-      void zapping.zap(event);
+      void startZap(event);
     },
-    [zapping],
+    [startZap],
   );
 
   const share = useCallback(
@@ -160,53 +229,21 @@ export function useNoteRowActions(
     [engine, notice],
   );
 
-  const pendingFor = useCallback(
-    (noteId: string): NoteActionControl | undefined => {
-      if (shareBusy.has(noteId)) return "share";
-      const action = noteActions.states.get(noteId);
-      if (action?.status === "working") return slotOf(action.action);
-      if (
-        bookmarks.state.status === "working" &&
-        bookmarks.state.target === noteId
-      ) {
-        return "bookmark";
-      }
-      if (zapping.states.get(noteId)?.status === "working") return "zap";
-      return undefined;
-    },
-    [bookmarks.state, noteActions.states, shareBusy, zapping.states],
-  );
-
-  const noticeFor = useCallback(
-    (noteId: string) => {
-      const zapState = zapping.states.get(noteId);
-      if (zapState?.status === "handed-off") {
-        return zapState.invoice
-          ? `${zapState.message} ${zapState.invoice}`
-          : zapState.message;
-      }
-      return notices.get(noteId);
-    },
-    [notices, zapping.states],
-  );
-
-  const errorFor = useCallback(
-    (noteId: string) => {
-      const action = noteActions.states.get(noteId);
-      if (action?.status === "error") return action.message;
-      const zapState = zapping.states.get(noteId);
-      if (zapState?.status === "error") return zapState.message;
-      // The bookmark list is one document, so a failure carries the id of the
-      // note that asked for it — otherwise every row would show the message.
-      if (
-        bookmarks.state.status === "error" &&
-        bookmarks.state.target === noteId
-      ) {
-        return bookmarks.state.message;
-      }
-      return undefined;
-    },
-    [bookmarks.state, noteActions.states, zapping.states],
+  /*
+   * Rebuilt only when one of the four states actually moves, which is only ever a
+   * user action — so the sparse map, and therefore every idle row's `undefined`,
+   * survives the store re-emitting its whole matching set on every arriving event.
+   */
+  const statuses = useMemo(
+    () =>
+      noteRowStatuses({
+        shareBusy,
+        actions: actionStates,
+        notices,
+        zaps: zapStates,
+        bookmark: bookmarkState,
+      }),
+    [actionStates, bookmarkState, notices, shareBusy, zapStates],
   );
 
   const renderReplyComposer = useCallback(
@@ -243,12 +280,51 @@ export function useNoteRowActions(
     (noteId: string) => {
       const event = eventsRef.current.get(noteId);
       if (!event) return;
-      void noteActions.deleteNote(event);
+      void publishDeletion(event);
     },
-    [noteActions],
+    [publishDeletion],
   );
 
-  return useMemo(
+  const isAuthorMuted = useCallback(
+    (noteId: string) => {
+      const event = eventsRef.current.get(noteId);
+      return event !== undefined && muteRules.pubkeys.has(event.pubkey);
+    },
+    [muteRules],
+  );
+
+  const renderMuteDialog = useCallback(
+    (noteId: string, close: () => void, authorName?: string) => {
+      const event = eventsRef.current.get(noteId);
+      if (!event) return null;
+      return (
+        <MuteDialog
+          target={{ kind: "pubkey", value: event.pubkey }}
+          name={authorName ?? "this account"}
+          onClose={close}
+        />
+      );
+    },
+    [],
+  );
+
+  const renderReportDialog = useCallback(
+    (noteId: string, close: () => void, authorName?: string) => {
+      const event = eventsRef.current.get(noteId);
+      if (!event) return null;
+      return (
+        <ReportDialog
+          pubkey={event.pubkey}
+          noteId={event.id}
+          name={authorName ?? "this account"}
+          onClose={close}
+        />
+      );
+    },
+    [],
+  );
+
+  const actions = useMemo(
     () => ({
       canSign,
       react,
@@ -258,26 +334,28 @@ export function useNoteRowActions(
       share,
       canDelete,
       deleteNote,
-      isBookmarked: bookmarks.isBookmarked,
-      pendingFor,
-      noticeFor,
-      errorFor,
+      isBookmarked,
+      isAuthorMuted,
       renderReplyComposer,
+      renderMuteDialog,
+      renderReportDialog,
     }),
     [
       bookmark,
-      bookmarks.isBookmarked,
       canDelete,
       canSign,
       deleteNote,
-      errorFor,
-      noticeFor,
-      pendingFor,
+      isAuthorMuted,
+      isBookmarked,
       react,
+      renderMuteDialog,
       renderReplyComposer,
+      renderReportDialog,
       repost,
       share,
       zap,
     ],
   );
+
+  return useMemo(() => ({ actions, statuses }), [actions, statuses]);
 }

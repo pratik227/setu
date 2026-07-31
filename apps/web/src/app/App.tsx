@@ -38,6 +38,8 @@ import { MentionsScreen } from "../features/notifications/MentionsScreen";
 import { NotificationsScreen } from "../features/notifications/NotificationsScreen";
 import { useUnreadCount } from "../features/notifications/readState";
 import { ProfileScreen } from "../features/profile/ProfileScreen";
+import { SearchPalette } from "../features/search/SearchPalette";
+import { useSearchHotkey } from "../features/search/useSearchHotkey";
 import { SettingsScreen } from "../features/settings/SettingsScreen";
 import { type Route, routeTitle } from "../features/shell/routes";
 import { SetuSidebar } from "../features/shell/SetuSidebar";
@@ -152,6 +154,14 @@ export function App() {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [searching, setSearching] = useState(false);
+  /**
+   * A note the palette picked while a full-width surface was on screen.
+   *
+   * Held rather than opened, because there is nowhere to put it yet — see
+   * `openNoteFromSearch`.
+   */
+  const [pendingThread, setPendingThread] = useState<string | null>(null);
 
   /*
    * Raise the unlock dialog when an identity is locked.
@@ -212,6 +222,37 @@ export function App() {
     [],
   );
 
+  useSearchHotkey(() => setSearching(true));
+
+  /*
+   * Opening a note found in search, from wherever the reader was.
+   *
+   * The thread panel is the third column, and Messages and Articles own the whole
+   * surface, so it is not rendered beside them (see `FULL_WIDTH_ROUTES`).
+   * Calling `openThread` from one of those routes therefore set state that nothing
+   * could display, and picking a search result did visibly nothing.
+   *
+   * Navigating and setting the id in one go does not work either: the effect above
+   * closes the thread whenever the route changes, and it runs after this handler.
+   * So the id is parked and opened by the effect below, which is declared *after*
+   * that one and therefore wins within the same commit.
+   */
+  const openNoteFromSearch = useCallback((id: string) => {
+    if (FULL_WIDTH_ROUTES.has(navRef.current.route.name)) {
+      setPendingThread(id);
+      navRef.current.go({ name: "home" });
+      return;
+    }
+    setThreadId(id);
+  }, []);
+
+  useEffect(() => {
+    if (pendingThread === null) return;
+    if (FULL_WIDTH_ROUTES.has(route.name)) return;
+    setThreadId(pendingThread);
+    setPendingThread(null);
+  }, [pendingThread, route.name]);
+
   return (
     <AppShell>
       <TopChrome>
@@ -249,7 +290,7 @@ export function App() {
         <SetuSidebar
           route={route}
           onNavigate={nav.go}
-          onOpenSearch={() => nav.go({ name: "explore" })}
+          onOpenSearch={() => setSearching(true)}
           // Locked means the composer cannot publish. Sending the reader to the
           // unlock dialog is the honest response to "I want to post"; opening a
           // composer that will fail at the last step is not.
@@ -430,6 +471,18 @@ export function App() {
           holds a draft, and two of them means two drafts that can disagree. */}
       <ComposeDialog open={composing} onOpenChange={setComposing} />
       <UnlockDialog open={unlocking} onOpenChange={setUnlocking} />
+      {/* Mounted only while signed in: every result comes from the account's own
+          store, and an empty palette over an empty store would say "nothing on
+          this device matches" to someone who has not connected yet. */}
+      {session ? (
+        <SearchPalette
+          open={searching}
+          onOpenChange={setSearching}
+          onOpenProfile={openProfile}
+          onOpenNote={openNoteFromSearch}
+          onOpenHashtag={openHashtag}
+        />
+      ) : null}
     </AppShell>
   );
 }

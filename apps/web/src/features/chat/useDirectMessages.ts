@@ -1,6 +1,7 @@
 import { type Conversation, groupConversations } from "@setu/core";
 import {
   type ChatMessage,
+  type Filter,
   Kind,
   type NostrEvent,
   toChatMessage,
@@ -8,13 +9,24 @@ import {
 } from "@setu/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
-import { useSharedSubscription } from "../../engine/sharedSubscription";
+import { filterContentKey } from "../../engine/sharedSubscription";
 import { useStoreEvents } from "../discover/useStoreEvents";
 import { useSession } from "../identity/SessionProvider";
 import { loadReadMarks, saveReadMarks } from "./readMarks";
+import { useInboxRelays } from "./useInboxRelays";
 
 /**
  * The private-message inbox: gift wraps in, conversations out.
+ *
+ * ## Where the wraps are read from
+ *
+ * From the account's own kind-10050 relays as well as the configured set — the union
+ * `useInboxRelays` computes. This used to be the configured set alone, via
+ * `useSharedSubscription`, and that was a hole rather than a gap: NIP-17 senders
+ * deliver to the *recipient's* inbox list, so an account whose list named a relay
+ * Setu did not read was reachable by private message and could not see one. Both
+ * sides looked healthy — the sender's publish was accepted, the recipient's inbox was
+ * simply empty.
  *
  * ## Why decryption is cached rather than recomputed
  *
@@ -74,7 +86,8 @@ export function useDirectMessages(): DirectMessagesApi {
     [viewer, canRead],
   );
 
-  useSharedSubscription(filter);
+  const inboxRelays = useInboxRelays();
+  useInboxSubscription(filter, inboxRelays);
   const wraps = useStoreEvents(filter ?? MATCHES_NOTHING);
 
   // Keyed on the engine *and* the viewer: one account must never see plaintext
@@ -162,6 +175,48 @@ export function useDirectMessages(): DirectMessagesApi {
     undecryptable,
     canRead,
   };
+}
+
+/**
+ * Hold one gift-wrap REQ, named relay by relay, for as long as the inbox is open.
+ *
+ * Not `useSharedSubscription`: that fans a filter out over `engine.relays` and
+ * nothing else, which is exactly what left wraps on the account's own inbox relays
+ * unread. `subscriptions.subscribe` takes per-relay filters, so the inbox names its
+ * relays itself and the engine keeps its identity — rebuilding it to widen the read
+ * set would tear down every other live subscription and close and reopen the
+ * IndexedDB store built in the same memo (see `EngineProvider`).
+ *
+ * The effect is keyed on the *content* of the filter and the relay list, not their
+ * identities: both are recomputed as the store ticks, and re-running on identity
+ * would cancel the REQ before any relay answered — which looks like an inbox that
+ * never loads. Widening the relay list does reopen it, once, which is the point: the
+ * account's inbox list arrives after the first render.
+ */
+function useInboxSubscription(
+  filter: Filter | undefined,
+  relays: readonly string[],
+): void {
+  const engine = useEngine();
+  const key = useMemo(
+    () =>
+      filter && relays.length > 0
+        ? JSON.stringify([relays, filterContentKey(filter)])
+        : "",
+    [filter, relays],
+  );
+
+  useEffect(() => {
+    if (key === "") return;
+    const [urls, filterKey] = JSON.parse(key) as [string[], string];
+    const parsed = Object.fromEntries(
+      JSON.parse(filterKey) as readonly [string, unknown][],
+    ) as Filter;
+    const subscription = engine.subscriptions.subscribe({
+      filters: urls.map((relay) => ({ relay, filter: parsed })),
+    });
+    return () => subscription.close();
+  }, [engine, key]);
 }
 
 /** One conversation by id, or undefined. */

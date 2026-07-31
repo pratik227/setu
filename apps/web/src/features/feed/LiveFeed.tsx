@@ -1,6 +1,8 @@
 import type { FeedDefinition, FeedEntry } from "@setu/core";
 import { useEffect, useMemo, useRef } from "react";
 import { useSession } from "../identity/SessionProvider";
+import { muteFilterNotice } from "../moderation/muteEntries";
+import { useMutedFeed } from "../moderation/useMutedFeed";
 import type { NoteView } from "../notes/types";
 import { useInteractions } from "../notes/useInteractions";
 import { useNoteRowActions } from "../notes/useNoteRowActions";
@@ -118,11 +120,30 @@ export function LiveFeed({
     };
   }, [rowCount, pause]);
 
-  const entries = useMemo(
+  const matching = useMemo(
     () =>
       entryFilter ? snapshot.entries.filter(entryFilter) : snapshot.entries,
     [snapshot.entries, entryFilter],
   );
+
+  /*
+   * Mutes are applied here, above the metadata window rather than in the row.
+   *
+   * Everything below this line charges for the rows it is given: the window takes
+   * the first forty, and those forty are what the author interest set fetches
+   * profiles for, what the interaction tracker asks every relay about, and what the
+   * row action hook holds events for. A muted account that reached `FeedView` and
+   * was hidden there would still have taken a metadata slot, a profile fetch and a
+   * tracked note id from a row the reader can actually see.
+   *
+   * It is a separate pass from `entryFilter` on purpose, even though both drop rows:
+   * the caller's predicate is a description of the feed ("replies only"), so rows it
+   * rejects are not missing. Rows the *mute list* removed are missing, and the
+   * reader has to be told how many — hence a count of its own rather than one number
+   * covering both.
+   */
+  const muted = useMutedFeed(matching);
+  const entries = muted.entries;
 
   // Resolve metadata and counts for the rows a reader can plausibly reach, not
   // for every row held. A viewport-driven window is the eventual fix; a fixed
@@ -161,21 +182,42 @@ export function LiveFeed({
   // Only the rows in the metadata window get handlers, for the same reason they
   // are the only ones getting counts: everything below is not reachable yet.
   const events = useMemo(() => noteEventsIn(resolvable), [resolvable]);
-  const actions = useNoteRowActions(events);
+  const { actions, statuses } = useNoteRowActions(events);
+
+  const mutedNotice = muteFilterNotice(muted);
+
+  /*
+   * An empty page whose rows were all muted has to say so.
+   *
+   * "No notes yet" over a feed that fetched forty notes and hid all forty is the
+   * failure this whole notice exists to prevent — it reads as a broken relay set and
+   * sends the reader to the settings screen to fix something that is working.
+   */
+  const emptyBecauseMuted = notes.length === 0 && muted.hiddenRows > 0;
 
   return (
     <FeedView
       notes={notes}
       actions={actions}
+      statuses={statuses}
       loading={snapshot.loading && notes.length === 0}
       pendingCount={snapshot.pendingCount}
       onFlushPending={flush}
       onLoadMore={loadMore}
       hasMore={!snapshot.exhausted}
-      emptyTitle={emptyTitle ?? "No notes yet"}
+      {...(mutedNotice !== undefined ? { mutedNotice } : {})}
+      emptyTitle={
+        emptyBecauseMuted
+          ? "Everything here is muted"
+          : (emptyTitle ?? "No notes yet")
+      }
       emptyDescription={
-        emptyDescription ??
-        "Still reaching the relays. If this stays empty, check the relay list in settings."
+        emptyBecauseMuted
+          ? `${muted.hiddenRows} ${
+              muted.hiddenRows === 1 ? "note was" : "notes were"
+            } hidden by your mute list. Nothing is wrong with your relays.`
+          : (emptyDescription ??
+            "Still reaching the relays. If this stays empty, check the relay list in settings.")
       }
       onOpenThread={onOpenThread}
       onOpenProfile={onOpenProfile}

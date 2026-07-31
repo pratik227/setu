@@ -14,52 +14,28 @@ import {
 import {
   BadgeCheck,
   Copy,
+  Flag,
   Hash,
   Link2,
   MoreHorizontal,
   Repeat2,
   Trash2,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { NoteActionRow, type NoteRowActions } from "./NoteActionRow";
+import {
+  NoteActionRow,
+  type NoteRowActions,
+  type NoteRowStatus,
+} from "./NoteActionRow";
+import { NoteMedia } from "./NoteMedia";
 import { copyText } from "./noteLink";
 import { ProvenanceChip } from "./ProvenanceChip";
 import { absoluteTime, relativeTime } from "./relativeTime";
 import type { NoteView } from "./types";
 
 /** Media grid. One image goes full width; several tile into a 2-column grid. */
-function NoteMedia({ media }: { media: NonNullable<NoteView["media"]> }) {
-  if (media.length === 0) return null;
-  return (
-    <div
-      className={cn(
-        "mt-2 grid gap-1 overflow-hidden rounded-lg border border-border/60",
-        media.length > 1 ? "grid-cols-2" : "grid-cols-1",
-      )}
-    >
-      {media.map((item) => (
-        <div key={item.url} className="relative bg-muted">
-          {item.kind === "image" ? (
-            <img
-              src={item.url}
-              alt={item.alt ?? ""}
-              loading="lazy"
-              decoding="async"
-              className="max-h-96 w-full object-cover"
-            />
-          ) : (
-            <video
-              src={item.url}
-              controls
-              preload="metadata"
-              className="max-h-96 w-full"
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export interface NoteCardProps {
   note: NoteView;
@@ -76,6 +52,14 @@ export interface NoteCardProps {
    * counts as plain text rather than controls that do nothing.
    */
   actions?: NoteRowActions;
+  /**
+   * This row's own in-flight/notice/error state.
+   *
+   * Separate from `actions` so the capability object can stay reference-stable:
+   * one object carrying both meant a spinner on any row changed every row's
+   * props. Absent means this row has nothing in flight.
+   */
+  status?: NoteRowStatus;
   className?: string;
 }
 
@@ -96,6 +80,7 @@ export function NoteCard({
   onOpenThread,
   onOpenProfile,
   actions,
+  status,
   className,
 }: NoteCardProps) {
   const [revealed, setRevealed] = useState(false);
@@ -103,6 +88,11 @@ export function NoteCard({
   // Owned here rather than by the caller: a feed would otherwise need a
   // "which row is replying" state, and two rows could open at once.
   const [replying, setReplying] = useState(false);
+  // Same reasoning for the moderation dialogs, and one slot rather than two
+  // booleans so mute and report cannot both be open over the same note.
+  const [dialog, setDialog] = useState<"mute" | "report" | undefined>();
+  const closeDialog = () => setDialog(undefined);
+  const muted = actions?.isAuthorMuted(note.id) ?? false;
   const hidden = Boolean(note.contentWarning) && !revealed;
   const clampable = note.content.length > CLAMP_CHARS;
   const clamped = clampable && !expanded;
@@ -197,10 +187,12 @@ export function NoteCard({
             >
               {relativeTime(note.createdAt)}
             </time>
-            {/* Was a dead affordance: it appeared on hover and did nothing.
-                Only actions that actually work are listed — a menu that offers
-                mute or report before either exists is worse than a shorter
-                menu. */}
+            {/* Only actions that actually work are listed. This menu was once a
+                dead affordance that appeared on hover and did nothing, and the
+                rule that replaced it still holds: an item ships when the write
+                behind it exists, and never before. Mute and report are here
+                because kinds 10000 and 1984 are now wired end to end; both are
+                gated on a signer, because both publish. */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -234,6 +226,25 @@ export function NoteCard({
                   <Copy />
                   Copy author key
                 </DropdownMenuItem>
+                {actions?.canSign ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    {/* "Mute", not "Block": nothing here stops this account
+                        reaching the reader or their relays. The dialog is where
+                        that gets said in full — which is why the item opens one
+                        rather than writing straight away. */}
+                    <DropdownMenuItem onSelect={() => setDialog("mute")}>
+                      {muted ? <Volume2 /> : <VolumeX />}
+                      {muted ? "Unmute" : "Mute"} {note.author.displayName}
+                    </DropdownMenuItem>
+                    {/* Trailing ellipsis because it opens a form, and because a
+                        bare "Report" reads as something having been reported. */}
+                    <DropdownMenuItem onSelect={() => setDialog("report")}>
+                      <Flag />
+                      Report note…
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 {actions?.canDelete(note.id) ? (
                   <>
                     <DropdownMenuSeparator />
@@ -335,6 +346,7 @@ export function NoteCard({
             <NoteActionRow
               note={note}
               {...(actions ? { actions } : {})}
+              {...(status ? { status } : {})}
               replyOpen={replying}
               onToggleReply={() => setReplying((open) => !open)}
             />
@@ -354,6 +366,23 @@ export function NoteCard({
               )}
             </div>
           ) : null}
+
+          {/* Mounted only while open, so a feed of eighty rows is not eighty
+              dormant dialogs, and each one starts from a clean form. */}
+          {dialog === "mute" && actions
+            ? actions.renderMuteDialog(
+                note.id,
+                closeDialog,
+                note.author.displayName,
+              )
+            : null}
+          {dialog === "report" && actions
+            ? actions.renderReportDialog(
+                note.id,
+                closeDialog,
+                note.author.displayName,
+              )
+            : null}
         </div>
       </div>
     </article>

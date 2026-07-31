@@ -19,6 +19,13 @@ import type { NoteView } from "./types";
  * three components deep, and every handler added would otherwise be a change to
  * each layer between. Handlers take the note id because a `NoteView` is a render
  * model — the hook behind this resolves the id back to the event.
+ *
+ * Capabilities only, and deliberately: this object holds nothing that changes
+ * while a row is idle, so it keeps one identity for the life of a surface and a
+ * memoised row can compare it by reference. Transient per-row state lives in
+ * `NoteRowStatus`, because a shared object carrying "who is spinning right now"
+ * changes identity whenever *any* row acts — which made every row's props change
+ * and defeated memoisation for the whole feed.
  */
 export interface NoteRowActions {
   /**
@@ -38,17 +45,56 @@ export interface NoteRowActions {
   canDelete(noteId: string): boolean;
   /** Requests deletion (kind 5). Relays may or may not honour it. */
   deleteNote(noteId: string): void;
-  /** Which control on this row is mid-flight, if any. */
-  pendingFor(noteId: string): NoteActionControl | undefined;
-  /** Transient confirmation — "Link copied", "Invoice handed off". */
-  noticeFor(noteId: string): string | undefined;
-  errorFor(noteId: string): string | undefined;
+  /**
+   * True when this note's author is on the reader's mute list, so the menu can
+   * offer the un-mute rather than a mute that would refuse itself.
+   */
+  isAuthorMuted(noteId: string): boolean;
+  /**
+   * Mute/un-mute confirmation for this note's author (NIP-51 kind 10000).
+   *
+   * Rendered rather than fired, like the reply composer, for two reasons: muting is
+   * the one action here whose *wording* is load-bearing — it is not a block, and the
+   * list is public — and the write's in-flight and failure state then belongs to the
+   * dialog instead of to the row, which keeps this capability object stable.
+   */
+  renderMuteDialog(
+    noteId: string,
+    close: () => void,
+    authorName?: string,
+  ): ReactNode;
+  /** Report dialog (NIP-56 kind 1984). Publishes; moderates nothing. */
+  renderReportDialog(
+    noteId: string,
+    close: () => void,
+    authorName?: string,
+  ): ReactNode;
   /** Inline reply composer. The row owns whether it is open. */
   renderReplyComposer(
     noteId: string,
     close: () => void,
     authorName?: string,
   ): ReactNode;
+}
+
+/**
+ * What one row currently has to report about itself.
+ *
+ * Data rather than three accessors on the shared actions object, and only ever
+ * handed to the row it belongs to. Merged here from four independent hooks —
+ * reactions, bookmarks, zaps, share — which is what lets a row show exactly one
+ * spinner and one message without knowing they are separate subsystems.
+ *
+ * Absent for a row with nothing in flight, which is nearly every row nearly all
+ * the time; that absence is what keeps a memoised row's props reference-equal
+ * while a different row acts.
+ */
+export interface NoteRowStatus {
+  /** Which control on this row is mid-flight. */
+  readonly pending?: NoteActionControl;
+  /** Transient confirmation — "Link copied", "Invoice handed off". */
+  readonly notice?: string;
+  readonly error?: string;
 }
 
 /** The controls in the row, as far as busy/pending state is concerned. */
@@ -159,6 +205,8 @@ function NoteAction({
 export interface NoteActionRowProps {
   note: NoteView;
   actions?: NoteRowActions;
+  /** This row's own in-flight/notice/error state, if it has any. */
+  status?: NoteRowStatus;
   /** True while the inline reply composer is open under this note. */
   replyOpen?: boolean;
   onToggleReply?(): void;
@@ -179,12 +227,13 @@ export interface NoteActionRowProps {
 export function NoteActionRow({
   note,
   actions,
+  status,
   replyOpen = false,
   onToggleReply,
 }: NoteActionRowProps) {
   if (!actions) return <NoteCountRow note={note} />;
 
-  const pending = actions.pendingFor(note.id);
+  const pending = status?.pending;
   const bookmarked = actions.isBookmarked(note.id);
   const unavailable = actions.canSign ? undefined : READ_ONLY_REASON;
 
@@ -271,15 +320,13 @@ export function NoteActionRow({
         />
       </div>
 
-      {actions.noticeFor(note.id) ? (
+      {status?.notice ? (
         <p className="mt-1 text-2xs break-all text-muted-foreground">
-          {actions.noticeFor(note.id)}
+          {status.notice}
         </p>
       ) : null}
-      {actions.errorFor(note.id) ? (
-        <p className="mt-1 text-2xs text-destructive">
-          {actions.errorFor(note.id)}
-        </p>
+      {status?.error ? (
+        <p className="mt-1 text-2xs text-destructive">{status.error}</p>
       ) : null}
     </>
   );

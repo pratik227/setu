@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { loadReadMarks, readMarksKey, saveReadMarks } from "./readMarks";
+import {
+  clearReadMarks,
+  loadReadMarks,
+  readMarksKey,
+  saveReadMarks,
+} from "./readMarks";
 
 const ALICE = "a".repeat(64);
 const BOB = "b".repeat(64);
@@ -77,6 +82,27 @@ describe("read mark persistence", () => {
     expect(() =>
       saveReadMarks(ALICE, new Map([["c", 1]]), failing),
     ).not.toThrow();
+  });
+
+  it("removes one account's marks on sign-out and leaves the other's", () => {
+    // Conversation ids name their participants, so marks left behind tell the next
+    // person on a shared device who the previous one was messaging.
+    const storage = memoryStorage();
+    saveReadMarks(ALICE, new Map([["conv-1", 100]]), storage);
+    saveReadMarks(BOB, new Map([["conv-2", 200]]), storage);
+    clearReadMarks(ALICE, storage);
+    expect(storage.getItem(readMarksKey(ALICE))).toBeNull();
+    expect(loadReadMarks(BOB, storage)).toEqual(new Map([["conv-2", 200]]));
+  });
+
+  it("does not throw when storage refuses to forget", () => {
+    const failing = {
+      ...memoryStorage({ [readMarksKey(ALICE)]: '{"c":1}' }),
+      removeItem: () => {
+        throw new Error("SecurityError");
+      },
+    } as Storage;
+    expect(() => clearReadMarks(ALICE, failing)).not.toThrow();
   });
 
   it("does nothing when there is no storage at all", () => {

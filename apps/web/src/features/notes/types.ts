@@ -55,6 +55,20 @@ export interface MediaView {
   /** Blurhash or thumbnail data URI, so layout does not jump on load. */
   readonly placeholder?: string;
   readonly alt?: string;
+  /**
+   * Intrinsic pixel size the author declared in a NIP-92 `imeta` tag.
+   *
+   * Present only when the declared `dim` parsed as a usable pair — see
+   * `parseDim`. It exists so the row can reserve the box *before* the image
+   * loads: with no reservation every row below an image moves down the moment it
+   * decodes, once per image, and a timeline being read jumps under the reader.
+   *
+   * Still untrusted. These are the numbers the author typed, not measurements, so
+   * the renderer clamps the ratio it builds from them rather than trusting the
+   * shape (`reservedAspectRatio` in `noteMediaViews.ts`).
+   */
+  readonly width?: number;
+  readonly height?: number;
 }
 
 export interface NoteView {

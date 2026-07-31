@@ -164,11 +164,30 @@ export function SidebarSection({
   );
 }
 
+/**
+ * The keyboard hint for the search affordance, in this platform's notation.
+ *
+ * Hardcoded "⌘K" was wrong on every machine without a ⌘ key: the hint named a
+ * shortcut the reader could not press, while the one they could — Ctrl+K — went
+ * unadvertised. An affordance that states the wrong key is worse than one that
+ * states none, because it teaches the reader the feature does not work.
+ *
+ * Resolved once at module load: it cannot change while the page is open. Guarded
+ * because `navigator` is absent when this module is imported outside a browser,
+ * and a design-system import that throws in a test runner fails for reasons that
+ * have nothing to do with what is under test.
+ */
+const SEARCH_SHORTCUT_HINT: string = (() => {
+  if (typeof navigator === "undefined") return "⌘K";
+  const platform = `${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`;
+  return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘K" : "Ctrl K";
+})();
+
 /** Search entry in the sidebar: a 4%-ink pill, not a bordered input. */
 export function SidebarSearchButton({
   className,
   children,
-  shortcut = "⌘K",
+  shortcut = SEARCH_SHORTCUT_HINT,
   ...props
 }: ComponentProps<"button"> & { shortcut?: string }) {
   return (

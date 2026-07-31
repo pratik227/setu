@@ -126,7 +126,7 @@ export function BookmarksScreen({
   const noteIds = useMemo(() => noteIdsIn(resolvable), [resolvable]);
   const authors = useAuthors(pubkeys);
   const interactions = useInteractions(noteIds, session?.pubkey);
-  const actions = useNoteRowActions(held);
+  const { actions, statuses } = useNoteRowActions(held);
 
   /*
    * The previous result feeds back in so unchanged rows keep their identity.
@@ -169,6 +169,7 @@ export function BookmarksScreen({
       <FeedView
         notes={notes}
         actions={actions}
+        statuses={statuses}
         // Skeleton while a list is genuinely expected: either we have not seen
         // one yet and have not waited long enough to give up, or we have ids
         // whose notes are still being fetched.

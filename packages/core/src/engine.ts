@@ -48,9 +48,36 @@ export interface EngineOptions {
    */
   readonly signAuth?: (template: EventTemplate) => Promise<NostrEvent>;
   /**
-   * Store implementation. Defaults to in-memory — an app that wants persistence
-   * passes a `DexieEventStore`, which must be constructed with the same helpers
-   * (use `protocolHelpers` below).
+   * Relays that count as *chosen* even though they are not in {@link relays}, and
+   * whose NIP-42 challenges may therefore be answered.
+   *
+   * Consulted in addition to the configured set, never instead of it. It exists for
+   * one concrete case: NIP-17 gift wraps are read from the account's own kind-10050
+   * inbox list, which usually names relays outside `relays` and frequently ones that
+   * set `auth_required`. An inbox relay whose challenge goes unanswered returns
+   * silence, so the account is reachable by private message and sees none of them.
+   *
+   * The rule `relay/relayAuth.ts` states is unchanged: a signed AUTH event tells a
+   * relay exactly who is reading, so only relays the account itself named are
+   * eligible. A predicate rather than a second array because the answer changes
+   * while the engine lives — an inbox list arrives after the first render — and
+   * rebuilding the engine to widen it would drop every live subscription. Core does
+   * not fetch that list, so the app supplies the predicate rather than core keeping
+   * a list it cannot verify the provenance of.
+   */
+  readonly alsoAuthenticate?: (relay: string) => boolean;
+  /**
+   * Store implementation. Defaults to in-memory, and must keep doing so: this
+   * package runs in Node for `apps/cli` and for every test, where IndexedDB does
+   * not exist.
+   *
+   * An app that wants persistence builds it with `store/persistentStore`'s
+   * `createPersistentStore`, which scopes the database to the account, injects the
+   * same helpers this file uses (`protocolHelpers` below) and degrades to memory
+   * when storage is unavailable. Passing a bare `DexieEventStore` skips that last
+   * part.
+   *
+   * Lifetime stays with whoever built it — see {@link Engine.close}.
    */
   readonly store?: EventStore;
   /**
@@ -82,6 +109,14 @@ export interface Engine {
    */
   readonly relayInfo: RelayInfoCache;
   readonly relays: readonly string[];
+  /**
+   * Closes the relay pool. Deliberately *not* the store: a caller that passed one
+   * in may outlive this engine, and closing a store out from under its owner would
+   * drop live observers the owner still holds. Whoever built the store closes it —
+   * a persistent one holds an IndexedDB connection, so on an account switch that
+   * call is what stops the previous account's handle leaking for the life of the
+   * tab.
+   */
   close(): void;
 }
 
@@ -95,6 +130,26 @@ export const protocolHelpers = {
   isValidEventShape,
   verifyEventSignature,
 } as const;
+
+/**
+ * Whether this account chose `relay`, and may therefore prove who it is to it.
+ *
+ * Its own function so the rule is testable without a socket: it is the whole of
+ * Setu's answer to "may this relay learn the reader's pubkey", and the two halves
+ * come from different places — a configured list the user typed, and a predicate
+ * over lists the app fetched. Compared with `sameRelay` rather than by string, so a
+ * challenge from `wss://Relay.Example/` is still recognised as the relay the
+ * account configured as `wss://relay.example`.
+ */
+export function isChosenRelay(
+  options: Pick<EngineOptions, "relays" | "alsoAuthenticate">,
+  relay: string,
+): boolean {
+  return (
+    options.relays.some((configured) => sameRelay(configured, relay)) ||
+    options.alsoAuthenticate?.(relay) === true
+  );
+}
 
 /** Build a fully wired engine. */
 export function createEngine(options: EngineOptions): Engine {
@@ -121,14 +176,17 @@ export function createEngine(options: EngineOptions): Engine {
      * NIP-42. Without a signer the pool never authenticates, which is correct for
      * a signed-out session: there is no identity to prove.
      *
-     * Scoped to `options.relays` — the relays this account configured. A relay the
-     * account chose has already been trusted with its traffic; one encountered
+     * Scoped to the relays this account chose: `options.relays`, plus whatever
+     * `alsoAuthenticate` recognises — the app's own inbox list, in practice. A relay
+     * the account chose has already been trusted with its traffic; one encountered
      * through outbox routing has not, and answering its challenge would hand it a
      * pubkey it had no other way to learn.
      */
     ...(options.signAuth ? { signAuth: options.signAuth } : {}),
-    shouldAuthenticate: (relay) =>
-      options.relays.some((configured) => sameRelay(configured, relay)),
+    // Read on every challenge rather than resolved once: an inbox list arrives
+    // after the engine is built, and an allowance frozen at construction would
+    // leave the relay holding this account's private mail permanently anonymous.
+    shouldAuthenticate: (relay) => isChosenRelay(options, relay),
     isValidEventShape,
     onNotice: options.onNotice,
     onError: (relay, e) => onError(`relay:${relay}`, e),

@@ -74,6 +74,8 @@ export {
   MAX_EXPIRATION_SECONDS,
   parseExpirationValue,
 } from "./store/expiration";
+export type { FallbackEventStoreOptions } from "./store/fallbackStore";
+export { FallbackEventStore } from "./store/fallbackStore";
 export {
   addressAuthor,
   addressOf,
@@ -89,10 +91,32 @@ export {
   KIND_REPOST,
   makeAddress,
 } from "./store/kinds";
+export type {
+  StoreMaintenanceOptions,
+  TimerHandle,
+} from "./store/maintenance";
+export {
+  MAX_SWEEP_DELAY_MS,
+  MIN_SWEEP_DELAY_MS,
+  startStoreMaintenance,
+  sweepDelayMs,
+} from "./store/maintenance";
 export type { EventStoreOptions } from "./store/memoryStore";
 export { MemoryEventStore } from "./store/memoryStore";
+export type { MuteReason, MuteRules } from "./store/muteFilter";
+export {
+  isMuted,
+  isMuteRulesEmpty,
+  mutedReason,
+  muteRulesFrom,
+  muteRulesKey,
+  NO_MUTES,
+  occursAsWord,
+} from "./store/muteFilter";
 export type { ObserverRegistryOptions } from "./store/observers";
 export { ObserverRegistry } from "./store/observers";
+export type { PersistentStoreOptions } from "./store/persistentStore";
+export { createPersistentStore } from "./store/persistentStore";
 export {
   isProtected,
   isProtectedEventPublishError,
@@ -117,6 +141,16 @@ export {
   mergeProvenance,
   shouldReplace,
 } from "./store/replaceable";
+export type {
+  EvictingEventStore,
+  RetentionPolicy,
+} from "./store/retention";
+export {
+  DEFAULT_RETENTION_SECONDS,
+  defaultRetentionPolicy,
+  EVICTABLE_KINDS,
+  isEvictable,
+} from "./store/retention";
 export type { DeletionTargets, TombstoneRecord } from "./store/tombstones";
 export {
   addressTombstoneKey,
@@ -175,6 +209,20 @@ export type {
   RelayPoolOptions,
 } from "./relay/relayPool";
 export { WebSocketRelayPool } from "./relay/relayPool";
+export type {
+  SearchFilterOptions,
+  SearchReach,
+  SearchRelay,
+  SearchRouting,
+  SearchRoutingInput,
+} from "./relay/searchRouting";
+export {
+  MIN_SEARCH_QUERY_LENGTH,
+  planRelaySearch,
+  SEARCH_LIMIT,
+  searchFilters,
+  searchReach,
+} from "./relay/searchRouting";
 export {
   DEFAULT_OVERLAP_SECONDS,
   filterFingerprint,

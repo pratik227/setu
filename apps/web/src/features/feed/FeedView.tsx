@@ -1,50 +1,47 @@
 import { Button, cn, EmptyState, ScrollArea, Skeleton } from "@setu/ui";
 import { ArrowUp, Inbox } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { NoteRowActions } from "../notes/NoteActionRow";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import type { NoteRowActions, NoteRowStatus } from "../notes/NoteActionRow";
 import { NoteCard } from "../notes/NoteCard";
 import { useRenderedContent } from "../notes/NoteContent";
 import type { NoteView } from "../notes/types";
-import { useProvenance } from "../notes/useProvenance";
+import { type ProvenanceMap, useProvenance } from "../notes/useProvenance";
 
 /**
- * One feed row. Exists as its own component so `useRenderedContent` can be a
- * hook — tokenization is per-note, and a hook cannot run inside a `.map`.
+ * One feed row, memoised — and this time the memo skips something.
+ *
+ * It is its own component because `useRenderedContent` is a hook: tokenization is
+ * per-note and cannot run inside a `.map`. Re-parsing that content is also the
+ * expensive part of a row, which is what makes a comparison per row worth paying.
+ *
+ * Four things have to hold before the memo skips anything, and an earlier attempt
+ * shipped with only the first, measured no improvement, and was reverted:
+ *
+ *  1. `toNoteViews` reuses the previous view object for an unchanged row, so `note`
+ *     stays reference-equal across a tick that changed some other row.
+ *  2. `useNoteRowActions` hands back capabilities separately from transient state,
+ *     so `actions` holds one identity for the life of the surface. It used to carry
+ *     `pendingFor`/`noticeFor`/`errorFor`, which closed over live state and gave
+ *     the whole object a new identity on every render — measured at 1558 `actions`
+ *     prop changes across 1558 renders.
+ *  3. A row's `status` is `undefined` unless that row itself has something in
+ *     flight, because the map behind it is sparse — so it is the same `undefined`
+ *     every render and React's default shallow comparison is enough. No custom
+ *     comparator: one would have to compare `status` field by field, which is a
+ *     correctness burden forever in exchange for nothing measurable.
+ *  4. `useStableProvenance` below, for the last prop that was still churning.
+ *
+ * Measured on a live timeline, 25s windows, dev build — so StrictMode doubles every
+ * count, equally on both sides. Without the memo: 7372 row renders against a
+ * ceiling of 94 feed re-renders x 79 rows = 7426, which is every row every time.
+ * With it: 112 renders against a 4756 ceiling. Clicking one row's share button
+ * costs 1 row render rather than the 82 it used to.
  */
-/**
- * One feed row, memoised.
- *
- * Worth it because the store re-emits its whole matching set on every change: an
- * author resolving, one reaction arriving, a new note landing. Without this, each
- * of those re-rendered every row on screen — and each row re-parses its content
- * into tokens, which is the expensive part.
- *
- * This only works because `toNoteViews` reuses the previous view object when a row
- * is unchanged. Memoising against freshly built objects would compare unequal
- * every time and skip nothing.
- */
-/**
- * One feed row.
- *
- * Deliberately **not** `React.memo`, and the reason is measured rather than
- * assumed. `toNoteViews` now keeps a row's view object stable when nothing about
- * it changed, which is the prerequisite — but the `actions` object handed to every
- * row carries per-row transient state (`pendingFor`, `noticeFor`, `errorFor`) that
- * changes whenever *any* row acts or a publish state moves. So `actions` is a new
- * identity on nearly every render, and a memo comparing it skips nothing.
- *
- * Instrumented against a live feed: 8 feed re-renders x 80 rows = 640 row renders,
- * with memo and without. Identical. A memo there costs a comparison per row per
- * render and buys nothing, which is worse than no memo at all.
- *
- * Making it pay off means splitting that transient state out of the shared object
- * so each row sees only its own — a change to `NoteRowActions`, `NoteCard` and
- * `NoteActionRow`. Worth doing; not worth pretending is already done.
- */
-function NoteRow({
+const NoteRow = memo(function NoteRow({
   note,
   provenanceRelays,
   actions,
+  status,
   onOpenThread,
   onOpenProfile,
   onOpenHashtag,
@@ -52,11 +49,17 @@ function NoteRow({
   note: NoteView;
   provenanceRelays?: readonly string[];
   actions?: NoteRowActions;
+  /**
+   * This row's own in-flight/notice/error state.
+   *
+   * Always passed, `undefined` included, so the prop set has a constant shape —
+   * a key appearing and disappearing is a props change to the shallow comparison
+   * even when nothing about the row differs.
+   */
+  status: NoteRowStatus | undefined;
   onOpenThread?(id: string): void;
   onOpenProfile?(pubkey: string): void;
   onOpenHashtag?(tag: string): void;
-  /** Fired when the reader leaves the top, so newer rows can be staged. */
-  /** Fired on return to the top, so staged rows can flow in again. */
 }) {
   const { body, media } = useRenderedContent({
     content: note.content,
@@ -75,8 +78,39 @@ function NoteRow({
       onOpenThread={onOpenThread}
       onOpenProfile={onOpenProfile}
       {...(actions ? { actions } : {})}
+      {...(status ? { status } : {})}
     />
   );
+});
+
+/**
+ * The same provenance map, with each row's relay list held at its old identity
+ * when the relays have not changed.
+ *
+ * `useProvenance` re-reads the store on every write touching the rows on screen,
+ * and hands back a fresh array per row each time — measured at 292 provenance prop
+ * changes over a live window, 237 of them identical in content. Each one was a
+ * memoised row re-rendering, and re-tokenizing its content, because an array of
+ * the same two relay URLs had been rebuilt.
+ */
+function useStableProvenance(provenance: ProvenanceMap): ProvenanceMap {
+  const held = useRef<ProvenanceMap>(new Map());
+  return useMemo(() => {
+    const next = new Map<string, readonly string[]>();
+    for (const [noteId, relays] of provenance) {
+      const earlier = held.current.get(noteId);
+      next.set(
+        noteId,
+        earlier !== undefined && sameRelays(earlier, relays) ? earlier : relays,
+      );
+    }
+    held.current = next;
+    return next;
+  }, [provenance]);
+}
+
+function sameRelays(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((relay, i) => relay === b[i]);
 }
 
 function NoteSkeleton() {
@@ -102,6 +136,15 @@ export interface FeedViewProps {
    * layer in between. Absent means the rows render counts without controls.
    */
   actions?: NoteRowActions;
+  /**
+   * Per-row in-flight/notice/error state, keyed by note id and sparse — a row
+   * absent from it has nothing to report.
+   *
+   * Separate from `actions` so that object can stay reference-stable: a shared
+   * object that also answered "which row is spinning" changed identity whenever
+   * any row acted, and that alone re-rendered every row on screen.
+   */
+  statuses?: ReadonlyMap<string, NoteRowStatus>;
   loading?: boolean;
   /**
    * Count of newer notes held back while the reader is scrolled away from the
@@ -112,6 +155,15 @@ export interface FeedViewProps {
   onFlushPending?(): void;
   onLoadMore?(): void;
   hasMore?: boolean;
+  /**
+   * What the reader's mute list removed from this page, already worded.
+   *
+   * Rendered, not computed here: a feed that silently drops rows is
+   * indistinguishable from a feed that failed to load them, and the reader has no
+   * way to tell which one they are looking at. Absent means nothing was removed —
+   * never "nothing worth mentioning".
+   */
+  mutedNotice?: string;
   emptyTitle?: string;
   emptyDescription?: string;
   onOpenThread?(id: string): void;
@@ -139,11 +191,13 @@ export interface FeedViewProps {
 export function FeedView({
   notes,
   actions,
+  statuses,
   loading = false,
   pendingCount = 0,
   onFlushPending,
   onLoadMore,
   hasMore = false,
+  mutedNotice,
   emptyTitle = "Nothing here yet",
   emptyDescription,
   onOpenThread,
@@ -176,8 +230,8 @@ export function FeedView({
   }, [onLoadMore, hasMore, embedded, scrollRoot]);
 
   // Provenance is a local read over exactly the notes on screen.
-  const provenance = useProvenance(
-    useMemo(() => notes.map((note) => note.id), [notes]),
+  const provenance = useStableProvenance(
+    useProvenance(useMemo(() => notes.map((note) => note.id), [notes])),
   );
 
   // Shown at the top too, not only after scrolling away.
@@ -215,6 +269,16 @@ export function FeedView({
     </div>
   ) : null;
 
+  // In flow rather than sticky, and above the rows: it is a fact about the page the
+  // reader is looking at, not a control, so it scrolls away with the page it
+  // describes.
+  const filtered =
+    mutedNotice === undefined ? null : (
+      <p className="border-b border-border/50 px-4 py-2 text-xs text-muted-foreground">
+        {mutedNotice}
+      </p>
+    );
+
   const rows = (
     <FeedRows
       provenance={provenance}
@@ -223,6 +287,7 @@ export function FeedView({
       emptyTitle={emptyTitle}
       {...(emptyDescription !== undefined ? { emptyDescription } : {})}
       {...(actions ? { actions } : {})}
+      {...(statuses ? { statuses } : {})}
       onOpenThread={onOpenThread}
       onOpenProfile={onOpenProfile}
       onOpenHashtag={onOpenHashtag}
@@ -241,11 +306,13 @@ export function FeedView({
       {embedded ? (
         <div className="setu-feed-column">
           {banner}
+          {filtered}
           {rows}
         </div>
       ) : (
         <ScrollArea ref={scrollRef} className="setu-feed-column">
           {banner}
+          {filtered}
           {rows}
         </ScrollArea>
       )}
@@ -260,6 +327,7 @@ function FeedRows({
   emptyTitle,
   emptyDescription,
   actions,
+  statuses,
   onOpenThread,
   onOpenProfile,
   onOpenHashtag,
@@ -272,6 +340,7 @@ function FeedRows({
   | "emptyTitle"
   | "emptyDescription"
   | "actions"
+  | "statuses"
   | "onOpenThread"
   | "onOpenProfile"
   | "onOpenHashtag"
@@ -299,6 +368,7 @@ function FeedRows({
                 ? { provenanceRelays: provenance.get(note.id) }
                 : {})}
               {...(actions ? { actions } : {})}
+              status={statuses?.get(note.id)}
               onOpenThread={onOpenThread}
               onOpenProfile={onOpenProfile}
               onOpenHashtag={onOpenHashtag}

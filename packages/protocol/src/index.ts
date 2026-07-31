@@ -51,6 +51,7 @@ export {
   parseDmRelayList,
   toChatMessage,
 } from "./nip17";
+export { quotedEventIds } from "./nip18";
 export type {
   AddressRef,
   EventRef,
@@ -100,6 +101,8 @@ export {
   unwrap,
   wrap,
 } from "./nip59";
+export type { ImetaEntry, MediaDimensions } from "./nip92";
+export { parseDim, parseImeta, parseImetaTag } from "./nip92";
 export type { Nip07Provider } from "./signers";
 export {
   generateSecretKey,

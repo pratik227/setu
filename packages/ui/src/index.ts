@@ -38,6 +38,15 @@ export {
   TooltipProvider,
 } from "./components/overlays";
 export {
+  PaletteDialog,
+  PaletteField,
+  PaletteFooter,
+  PaletteGroup,
+  PaletteKey,
+  PaletteList,
+  PaletteOption,
+} from "./components/palette";
+export {
   Card,
   EmptyState,
   Panel,

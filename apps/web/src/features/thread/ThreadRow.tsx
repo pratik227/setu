@@ -1,7 +1,7 @@
 import { encodeNote, truncateNpub } from "@setu/protocol";
 import { cn } from "@setu/ui";
 import { CornerDownRight, HelpCircle } from "lucide-react";
-import type { NoteRowActions } from "../notes/NoteActionRow";
+import type { NoteRowActions, NoteRowStatus } from "../notes/NoteActionRow";
 import { NoteCard } from "../notes/NoteCard";
 import { useRenderedContent } from "../notes/NoteContent";
 import type { NoteView } from "../notes/types";
@@ -25,6 +25,8 @@ export interface ThreadRowProps {
   note: NoteView;
   /** Interaction wiring; absent renders counts without controls. */
   actions?: NoteRowActions;
+  /** This row's own in-flight/notice/error state, if it has any. */
+  status?: NoteRowStatus;
   /** 0 for the focused note and its ancestors, 1+ for nested replies. */
   depth?: number;
   /** The note the thread is opened on: emphasized, and not a link to itself. */
@@ -45,6 +47,7 @@ export interface ThreadRowProps {
 export function ThreadRow({
   note,
   actions,
+  status,
   depth = 0,
   focused = false,
   orphaned = false,
@@ -78,6 +81,7 @@ export function ThreadRow({
         note={withMedia}
         body={body}
         {...(actions ? { actions } : {})}
+        {...(status ? { status } : {})}
         onOpenProfile={onOpenProfile}
         {...(focused ? {} : { onOpenThread })}
         className={cn(

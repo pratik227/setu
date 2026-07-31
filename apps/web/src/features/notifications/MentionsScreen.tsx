@@ -133,7 +133,7 @@ export function MentionsScreen({
     for (const event of shown) map.set(event.id, event);
     return map;
   }, [shown]);
-  const actions = useNoteRowActions(eventMap);
+  const { actions, statuses } = useNoteRowActions(eventMap);
 
   /*
    * The previous result feeds back in so unchanged rows keep their identity.
@@ -204,6 +204,7 @@ export function MentionsScreen({
       <FeedView
         notes={notes}
         actions={actions}
+        statuses={statuses}
         loading={loading && notes.length === 0}
         onOpenThread={onOpenThread}
         onOpenProfile={onOpenProfile}

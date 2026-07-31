@@ -16,7 +16,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../identity/SessionProvider";
 import { relativeTime } from "../notes/relativeTime";
 import { useAuthors } from "../profiles/useAuthors";
+import { planDmDelivery, undeliverableMessage } from "./dmDelivery";
 import { useDirectMessages, useReadMarks } from "./useDirectMessages";
+import { type DmRelayLists, useDmRelayLists } from "./useDmRelayLists";
 import { useSendMessage } from "./useSendMessage";
 
 /**
@@ -32,7 +34,11 @@ import { useSendMessage } from "./useSendMessage";
  *
  * **Undeliverable is stated, not swallowed.** NIP-17 delivery depends on the
  * recipient having published a kind-10050. When they have not, sending fails with
- * that reason instead of appearing to succeed.
+ * that reason instead of appearing to succeed — and the screen says so *before* a
+ * message is typed, but only once the answer is actually known. Those lists are
+ * fetched here for every participant of every conversation (`useDmRelayLists`),
+ * which is also what makes the first send in a conversation instant instead of a
+ * round trip the user waits through.
  *
  * **Wraps we could not open are counted.** An inbox always contains some; hiding
  * them would mean silently dropping messages someone believes they sent.
@@ -60,6 +66,9 @@ export function ChatScreen({ onOpenProfile }: ChatScreenProps) {
     [conversations],
   );
   const authors = useAuthors(pubkeys);
+  // Held for the whole screen, not per conversation: a kind-10050 is replaceable,
+  // so one REQ covers every participant and opening a conversation costs nothing.
+  const dmRelays = useDmRelayLists(pubkeys);
   const nameOf = useCallback(
     (pubkey: Hex32) => {
       const author = authors.get(pubkey);
@@ -148,6 +157,7 @@ export function ChatScreen({ onOpenProfile }: ChatScreenProps) {
           title={conversationTitle(open, nameOf)}
           nameOf={nameOf}
           avatarFor={(pubkey) => authors.get(pubkey)?.avatarUrl}
+          dmRelays={dmRelays}
           {...(onOpenProfile ? { onOpenProfile } : {})}
         />
       ) : (
@@ -245,6 +255,7 @@ function ConversationView({
   title,
   nameOf,
   avatarFor,
+  dmRelays,
   onOpenProfile,
 }: {
   conversation: Conversation;
@@ -252,11 +263,38 @@ function ConversationView({
   title: string;
   nameOf(pubkey: Hex32): string | undefined;
   avatarFor(pubkey: Hex32): string | undefined;
+  dmRelays: DmRelayLists;
   onOpenProfile?(pubkey: string): void;
 }) {
   const [draft, setDraft] = useState("");
   const { state, send, reset } = useSendMessage();
   const bottom = useRef<HTMLDivElement>(null);
+
+  /*
+   * Who in this conversation has published no inbox — said before a message is
+   * typed rather than after one is written and refused.
+   *
+   * The same plan and the same words the send path uses, so a warning here and the
+   * error there can never disagree. Only *confirmed* absences are reported:
+   * `plan.unconfirmed` is dropped on purpose, because a list that has not arrived
+   * yet is not a list that does not exist, and a warning that cannot tell the
+   * difference is one readers learn to ignore.
+   */
+  const undeliverable = useMemo(() => {
+    const plan = planDmDelivery({
+      // The viewer is included: our own copy needs an inbox too, and a
+      // conversation we cannot keep our half of is worth knowing about early.
+      targets: [viewer, ...conversation.others],
+      lists: dmRelays.lists,
+      absenceConfirmed: dmRelays.absenceConfirmed,
+    });
+    if (plan.ok || plan.noInbox.length === 0) return undefined;
+    return undeliverableMessage({
+      author: viewer,
+      noInbox: plan.noInbox,
+      unconfirmed: [],
+    });
+  }, [conversation.others, dmRelays, viewer]);
 
   // Jump to the newest message when the conversation changes or one arrives.
   useEffect(() => {
@@ -353,6 +391,15 @@ function ConversationView({
         </ul>
         <div ref={bottom} />
       </ScrollArea>
+
+      {/* Suppressed while an error is showing: the send path's message is the
+          more specific one, and stacking both says it twice. */}
+      {undeliverable && state.status !== "error" ? (
+        <p className="flex items-start gap-1.5 border-t border-warning/40 bg-warning-bg px-4 py-2 text-xs">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span className="flex-1">{undeliverable}</span>
+        </p>
+      ) : null}
 
       {state.status === "error" ? (
         <p className="flex items-start gap-1.5 border-t border-border/50 px-4 py-2 text-xs text-destructive">

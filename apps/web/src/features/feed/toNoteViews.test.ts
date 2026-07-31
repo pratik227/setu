@@ -157,6 +157,63 @@ describe("toNoteViews", () => {
     expect(views[1]?.justArrived).toBe(true);
   });
 
+  it("leaves media unset for a note that shows none", () => {
+    const [view] = toNoteViews([noteEntry()], new Map(), new Map(), 0);
+    expect(view?.media).toBeUndefined();
+  });
+
+  it("carries the author's declared imeta dimensions onto the media view", () => {
+    // Without the size on the view model the row reserves no space, so every row
+    // below the image moves the moment it decodes.
+    const entry = noteEntry({
+      event: event({
+        content: "look https://x.test/a.png",
+        tags: [["imeta", "url https://x.test/a.png", "dim 1200x800"]],
+      }),
+    });
+    const [view] = toNoteViews([entry], new Map(), new Map(), 0);
+    expect(view?.media).toEqual([
+      { url: "https://x.test/a.png", kind: "image", width: 1200, height: 800 },
+    ]);
+  });
+
+  it("still shows a body image the author declared no imeta for", () => {
+    const entry = noteEntry({
+      event: event({ content: "look https://x.test/a.png" }),
+    });
+    const [view] = toNoteViews([entry], new Map(), new Map(), 0);
+    expect(view?.media?.[0]?.url).toBe("https://x.test/a.png");
+    expect(view?.media?.[0]?.width).toBeUndefined();
+  });
+
+  it("shows the reposted note's media, not the wrapper's", () => {
+    const target = event({
+      id: "2".repeat(64),
+      pubkey: AUTHOR_B,
+      content: "the original https://x.test/a.png",
+      tags: [["imeta", "url https://x.test/a.png", "dim 100x50"]],
+    });
+    const [view] = toNoteViews(
+      [
+        noteEntry({
+          key: "repost:2",
+          kind: "repost",
+          event: event({ id: "9".repeat(64), kind: 6, content: "" }),
+          target,
+          targetId: target.id,
+          reposters: [REPOSTER],
+          repostIds: ["9".repeat(64)],
+        }),
+      ],
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(view?.media).toEqual([
+      { url: "https://x.test/a.png", kind: "image", width: 100, height: 50 },
+    ]);
+  });
+
   it("resolves NIP-10 reply position", () => {
     const reply = noteEntry({
       event: event({
@@ -250,6 +307,117 @@ describe("toNoteViews identity", () => {
     const second = toNoteViews(entries, authors, new Map(), 0, first);
     expect(second[0]).not.toBe(first[0]);
     expect(second[0]?.author.displayName).toBe("Ada");
+  });
+
+  it("keeps identity for a repost row whose reposter list is rebuilt fresh", () => {
+    // `repostedBy` is built by mapping pubkeys through `fallbackAuthor`, which
+    // returns a new object every call — so the reposter list is a fresh array of
+    // fresh objects on every tick even when nobody new reposted. Comparing it by
+    // reference would make exactly the reposted rows un-memoisable.
+    const target = event({ id: "7".repeat(64) });
+    const entry = noteEntry({
+      key: "repost:7",
+      kind: "repost",
+      event: event({ id: "6".repeat(64), kind: 6, pubkey: REPOSTER }),
+      target,
+      targetId: target.id,
+      reposters: [REPOSTER],
+      repostIds: ["6".repeat(64)],
+    });
+    const first = toNoteViews([entry], new Map(), new Map(), 0);
+    const second = toNoteViews([entry], new Map(), new Map(), 0, first);
+    expect(second[0]).toBe(first[0]);
+  });
+
+  it("produces a new object when another account reposts the same note", () => {
+    const target = event({ id: "7".repeat(64) });
+    const base = {
+      key: "repost:7",
+      kind: "repost" as const,
+      event: event({ id: "6".repeat(64), kind: 6, pubkey: REPOSTER }),
+      target,
+      targetId: target.id,
+    };
+    const first = toNoteViews(
+      [noteEntry({ ...base, reposters: [REPOSTER] })],
+      new Map(),
+      new Map(),
+      0,
+    );
+    const second = toNoteViews(
+      [noteEntry({ ...base, reposters: [REPOSTER, AUTHOR_B] })],
+      new Map(),
+      new Map(),
+      0,
+      first,
+    );
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0]?.repostedBy).toHaveLength(2);
+  });
+
+  it("keeps identity for a row with media, whose media list is derived", () => {
+    // The trap this locks. `media` is computed from the event, so the obvious
+    // implementation builds a fresh array on every call — and `sameView` compares
+    // `media` by reference, so every row with an image would look changed on every
+    // store tick and `React.memo` would skip nothing for exactly the rows that
+    // cost the most to render.
+    const entries = [
+      noteEntry({
+        event: event({
+          content: "look https://x.test/a.png",
+          tags: [["imeta", "url https://x.test/a.png", "dim 1200x800"]],
+        }),
+      }),
+    ];
+    const first = toNoteViews(entries, new Map(), new Map(), 0);
+    const second = toNoteViews(entries, new Map(), new Map(), 0, first);
+    expect(second[0]).toBe(first[0]);
+    expect(second[0]?.media).toBe(first[0]?.media);
+  });
+
+  it("keeps the media array across a tick that changed a count", () => {
+    // The row object is rebuilt, but re-deriving the media is wasted work: the
+    // event is immutable, so the same note always shows the same media.
+    const entries = [
+      noteEntry({ event: event({ content: "look https://x.test/a.png" }) }),
+    ];
+    const first = toNoteViews(entries, new Map(), new Map(), 0);
+    const second = toNoteViews(
+      entries,
+      new Map(),
+      new Map([[entries[0]!.event.id, counts({ replies: 1 })]]),
+      0,
+      first,
+    );
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0]?.media).toBe(first[0]?.media);
+  });
+
+  it("re-derives media when the row starts showing a different note", () => {
+    // A repost row's target can arrive after the wrapper, so one rowKey does
+    // legitimately change which note it displays.
+    const wrapper = event({ id: "6".repeat(64), kind: 6, content: "" });
+    const base = {
+      key: "repost:7",
+      kind: "repost" as const,
+      event: wrapper,
+      targetId: "7".repeat(64),
+    };
+    const first = toNoteViews([noteEntry(base)], new Map(), new Map(), 0);
+    expect(first[0]?.media).toBeUndefined();
+
+    const target = event({
+      id: "7".repeat(64),
+      content: "the original https://x.test/a.png",
+    });
+    const second = toNoteViews(
+      [noteEntry({ ...base, target })],
+      new Map(),
+      new Map(),
+      0,
+      first,
+    );
+    expect(second[0]?.media?.[0]?.url).toBe("https://x.test/a.png");
   });
 
   it("keeps identity for untouched rows while one row changes", () => {

@@ -83,7 +83,7 @@ export function ThreadView({
     () => new Map(events.map((event) => [event.id, event])),
     [events],
   );
-  const actions = useNoteRowActions(eventsById);
+  const { actions, statuses } = useNoteRowActions(eventsById);
 
   const replyCount = tree.replies.length;
 
@@ -138,6 +138,7 @@ export function ThreadView({
                   key={slot.id}
                   note={view}
                   actions={actions}
+                  status={statuses.get(view.id)}
                   {...(onOpenThread ? { onOpenThread } : {})}
                   {...(onOpenProfile ? { onOpenProfile } : {})}
                   {...(onOpenHashtag ? { onOpenHashtag } : {})}
@@ -150,6 +151,7 @@ export function ThreadView({
                 focused
                 note={views.get(tree.focused.id)!}
                 actions={actions}
+                status={statuses.get(tree.focused.id)}
                 {...(onOpenProfile ? { onOpenProfile } : {})}
                 {...(onOpenHashtag ? { onOpenHashtag } : {})}
               />
@@ -168,6 +170,7 @@ export function ThreadView({
                     key={reply.event.id}
                     note={view}
                     actions={actions}
+                    status={statuses.get(view.id)}
                     depth={reply.depth}
                     orphaned={reply.orphaned}
                     {...(onOpenThread ? { onOpenThread } : {})}
