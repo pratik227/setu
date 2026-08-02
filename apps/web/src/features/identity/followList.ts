@@ -141,3 +141,70 @@ export function isPlausibleFollowWrite(
   // A single follow/unfollow moves the count by exactly one.
   return Math.abs(next - previous) <= 1;
 }
+
+/**
+ * Follow several people at once, for applying a follow pack.
+ *
+ * A separate entry point rather than a loop over {@link editFollowList}, because a
+ * loop would be wrong in a way that is easy to miss: each iteration builds its
+ * template from `current`, so publishing them in sequence produces N events that
+ * each add one person and *drop the previous N−1*. The last one to win would leave
+ * the account following exactly one of the pack's members. One event, built once,
+ * is the only correct shape.
+ *
+ * Every other rule from the single-target path still applies — an unconfirmed
+ * absence refuses, unknown tags are copied through byte-for-byte, and entries are
+ * appended so existing indices do not move.
+ */
+export function followManyEdit(input: {
+  readonly current: NostrEvent | undefined;
+  readonly absenceConfirmed: boolean;
+  readonly targets: readonly Hex32[];
+}): FollowEditResult {
+  const { current, absenceConfirmed, targets } = input;
+
+  if (!current && !absenceConfirmed) {
+    // Same reasoning as a first single follow: creating a list from an unverified
+    // absence is indistinguishable, afterwards, from unfollowing everyone.
+    return { ok: false, reason: "unverified-absence" };
+  }
+
+  const already = new Set(followedPubkeys(current));
+  const additions = [...new Set(targets)].filter(
+    (target) => !already.has(target),
+  );
+  if (additions.length === 0) return { ok: false, reason: "no-change" };
+
+  const tags: string[][] = (current?.tags ?? []).map((tag) => [...tag]);
+  for (const target of additions) tags.push(["p", target]);
+
+  return {
+    ok: true,
+    template: {
+      kind: Kind.Contacts,
+      // Preserved verbatim: kind-3 `content` historically carried a relay map,
+      // and dropping it is a silent data loss for whoever still reads one.
+      content: current?.content ?? "",
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+    },
+  };
+}
+
+/**
+ * Plausibility guard for a bulk follow.
+ *
+ * Different from {@link isPlausibleFollowWrite} because the expected delta is
+ * different: applying a pack is purely *additive*. The count may rise by any
+ * amount, but it must never fall — a bulk write that removes anybody is a bug in
+ * the merge, and publishing it would silently unfollow people the user never
+ * touched.
+ */
+export function isPlausibleBulkFollow(
+  before: NostrEvent | undefined,
+  template: EventTemplate,
+): boolean {
+  const previous = followedPubkeys(before).length;
+  const next = (template.tags ?? []).filter((tag) => tag[0] === "p").length;
+  return next >= previous;
+}

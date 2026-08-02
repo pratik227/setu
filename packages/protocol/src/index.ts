@@ -46,6 +46,16 @@ export {
   looksLikeNip04,
   Nip04Error,
 } from "./nip04";
+export type { DerivedAccount, SeedPhraseError } from "./nip06";
+export {
+  deriveFromSeedPhrase,
+  generateSeedPhrase,
+  normalizeSeedPhrase,
+  SEED_PHRASE_LENGTHS,
+  seedPhraseMessage,
+  seedPhraseWordCount,
+  validateSeedPhrase,
+} from "./nip06";
 export type { MineOptions, MineResult } from "./nip13";
 export {
   committedDifficulty,
@@ -141,6 +151,12 @@ export {
   isNcryptsec,
   KeySecurity,
 } from "./nip49";
+export type { FollowPack } from "./nip51packs";
+export {
+  newestFollowPacks,
+  newMembers,
+  parseFollowPack,
+} from "./nip51packs";
 export type { Rumor, UnwrapResult } from "./nip59";
 export {
   GiftWrapError,

@@ -14,6 +14,7 @@ import {
 import {
   Eye,
   KeyRound,
+  ListOrdered,
   Lock,
   Puzzle,
   Radio,
@@ -29,6 +30,7 @@ import { BunkerSignIn } from "./BunkerSignIn";
 import { useSession } from "./SessionProvider";
 
 type Mode =
+  | "seed"
   | "choose"
   | "extension"
   | "key"
@@ -164,11 +166,13 @@ export function LoginScreen() {
     nip07Available,
     signInWithExtension,
     signInWithSecretKey,
+    signInWithSeedPhrase,
     createIdentity,
     signInReadonly,
   } = useSession();
 
   const [mode, setMode] = useState<Mode>("choose");
+  const [phrase, setPhrase] = useState("");
   const [secret, setSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [npub, setNpub] = useState("");
@@ -259,6 +263,13 @@ export function LoginScreen() {
             onClick={() => setMode("key")}
           />
           <Choice
+            icon={<ListOrdered />}
+            title="Use a recovery phrase"
+            description="12 or 24 words from another Nostr app (NIP-06)."
+            disabled={busy}
+            onClick={() => setMode("seed")}
+          />
+          <Choice
             icon={<Sparkles />}
             title="Create a new identity"
             description="Generates a keypair on this device."
@@ -309,6 +320,43 @@ export function LoginScreen() {
         >
           <ShieldCheck />
           Encrypt and sign in
+        </Button>
+      </AuthShell>
+    );
+  }
+
+  if (mode === "seed") {
+    return (
+      <AuthShell title="Use a recovery phrase" onBack={() => setMode("choose")}>
+        <Field
+          label="Recovery phrase"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="twelve words separated by spaces"
+          hint="The words another Nostr app gave you to write down. Setu derives your key from them and stores only the key — never the phrase, which would unlock more than this one account."
+          value={phrase}
+          onChange={(e) => setPhrase(e.target.value)}
+        />
+        <Field
+          label="Passphrase"
+          type="password"
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
+          hint="Encrypts the derived key on this device. Not the same thing as your recovery phrase."
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+        />
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        <Button
+          className="w-full"
+          disabled={busy || !phrase.trim() || passphrase.length < 8}
+          onClick={() =>
+            void run(() => signInWithSeedPhrase(phrase, passphrase))
+          }
+        >
+          <ShieldCheck />
+          Derive and sign in
         </Button>
       </AuthShell>
     );

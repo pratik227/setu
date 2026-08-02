@@ -36,6 +36,21 @@ export interface StoredRemoteSigner {
   /** The signer's key — *not* the account's. See `protocol/signers/nip46/uri.ts`. */
   readonly pubkey: string;
   readonly relays: readonly string[];
+  /**
+   * The content encryption this signer was last observed to speak.
+   *
+   * Not a secret and not a capability — it is one of two public constants, and the
+   * worst a wrong value can do is cost one probe. It is stored because rediscovering
+   * it is *slow* rather than hard: a signer that only reads NIP-04 cannot tell us so,
+   * because it cannot read the request that would ask. The discovery path therefore
+   * waits out an 8-second silence before trying the other scheme, and without this
+   * field every reload pays that 8 seconds again on the first thing the user signs.
+   *
+   * Optional on purpose. Absent means "not yet observed", which is exactly the state
+   * a first connection is in, and every record written before this field existed
+   * loads as that rather than as a wrong guess.
+   */
+  readonly scheme?: "nip04" | "nip44";
 }
 
 export interface StoredSession {
@@ -59,6 +74,12 @@ function isRemoteSigner(value: unknown): value is StoredRemoteSigner {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.pubkey !== "string" || !/^[0-9a-f]{64}$/.test(v.pubkey)) {
+    return false;
+  }
+  // A scheme that is neither known constant is dropped rather than carried: it
+  // would be handed to the signer as fact and suppress the probe that would have
+  // found the truth.
+  if (v.scheme !== undefined && v.scheme !== "nip04" && v.scheme !== "nip44") {
     return false;
   }
   return (

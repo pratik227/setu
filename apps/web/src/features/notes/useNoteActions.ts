@@ -31,6 +31,7 @@ import {
   buildReaction,
   buildRepost,
 } from "../compose/buildNote";
+import type { MiningProgress } from "../compose/pow";
 import { usePublish } from "../compose/usePublish";
 import { useSession } from "../identity/SessionProvider";
 
@@ -71,6 +72,16 @@ export interface NoteActionsApi {
   deleteNote(note: NostrEvent): Promise<boolean>;
   /** Dismiss a row's error. */
   clear(noteId: string): void;
+  /**
+   * Proof of work being mined for the action in flight, if any.
+   *
+   * At most one, because `run` serialises on `inFlight` and one publisher serves
+   * every note action. Surfaced so the acting row can say what it is spending
+   * ten seconds on instead of showing a bare spinner.
+   */
+  readonly mining?: MiningProgress | undefined;
+  /** Abandon the work and publish without it. No-op when nothing is mining. */
+  skipMining(): void;
 }
 
 /** Which control the given action drives. */
@@ -84,7 +95,18 @@ const READ_ONLY =
 export function useNoteActions(): NoteActionsApi {
   const engine = useEngine();
   const { session } = useSession();
-  const { publish } = usePublish();
+  const { publish, state: publishState, skipMining } = usePublish();
+
+  /*
+   * Mining progress for whichever action is in flight.
+   *
+   * There is one publisher behind every note action, so at most one row can be
+   * mining at a time — `run` already serialises on `inFlight`. Reading it off the
+   * publish state rather than tracking it separately keeps the composer and the
+   * row reporting the same numbers from the same source.
+   */
+  const mining =
+    publishState.status === "signing" ? publishState.mining : undefined;
   const [states, setStates] = useState<ReadonlyMap<string, NoteActionState>>(
     new Map(),
   );
@@ -312,5 +334,15 @@ export function useNoteActions(): NoteActionsApi {
     [run],
   );
 
-  return { states, react, unreact, repost, unrepost, deleteNote, clear };
+  return {
+    states,
+    react,
+    unreact,
+    repost,
+    unrepost,
+    deleteNote,
+    clear,
+    mining,
+    skipMining,
+  };
 }

@@ -4,6 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { REPLACEABLE_LIST_LIMIT } from "../../engine/queryLimits";
 import { useSharedSubscription } from "../../engine/sharedSubscription";
+import { miningLabel } from "../compose/pow";
 import type { usePublish } from "../compose/usePublish";
 import { useStoreEvents } from "../discover/useStoreEvents";
 import { useSession } from "../identity/SessionProvider";
@@ -125,12 +126,15 @@ export function SaveRow({
   state,
   onSave,
   onDismiss,
+  onSkipMining,
 }: {
   busy: boolean;
   error: string | undefined;
   state: ReturnType<typeof usePublish>["state"];
   onSave(): void;
   onDismiss(): void;
+  /** Abandon proof of work and save without it. Omitted where unsupported. */
+  onSkipMining?: () => void;
 }) {
   const { session } = useSession();
   return (
@@ -147,6 +151,26 @@ export function SaveRow({
           >
             Dismiss
           </button>
+        </p>
+      ) : null}
+      {/*
+        Mining is part of saving once proof of work is switched on, and a settings
+        save is a *replaceable* write — the kind a reader is most likely to give up
+        on and retry, which is exactly what should not happen mid-mine. Saying what
+        the ten seconds are for is the difference between waiting and re-clicking.
+      */}
+      {state.status === "signing" && state.mining ? (
+        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <span>{miningLabel(state.mining)}</span>
+          {onSkipMining ? (
+            <button
+              type="button"
+              onClick={onSkipMining}
+              className="underline hover:no-underline"
+            >
+              Save without it
+            </button>
+          ) : null}
         </p>
       ) : null}
       {state.status === "failed" ? (

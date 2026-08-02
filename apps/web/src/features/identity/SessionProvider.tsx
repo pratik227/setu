@@ -30,12 +30,14 @@ import {
   rememberAccount,
   type StoredAccount,
 } from "./accounts";
+import { rememberScheme } from "./rememberScheme";
 import {
   connectToBunker,
   inviteRemoteSigner,
   type RemoteConnection,
   resumeBunker,
 } from "./remoteSigner";
+import { seedPhraseSignIn } from "./seedPhraseSignIn";
 import {
   clearSession,
   loadSession,
@@ -72,6 +74,15 @@ interface SessionContextValue {
   readonly locked: StoredSession | undefined;
   readonly nip07Available: boolean;
   /**
+   * Whether a remote signer has stopped answering, when one is in use.
+   *
+   * `undefined` for every other session kind — a local key cannot be unreachable.
+   * The keep-alive already makes a dead connection *fail fast* instead of costing a
+   * full request deadline; this is what lets a surface say so before the user
+   * discovers it by trying to post.
+   */
+  readonly signerHealth: "alive" | "unreachable" | undefined;
+  /**
    * Every identity this device remembers, oldest first.
    *
    * Saved credentials, not live sessions: exactly one account is signed in at a
@@ -82,6 +93,16 @@ interface SessionContextValue {
   signInWithExtension(): Promise<void>;
   /** Import an `nsec`/hex key, encrypting it at rest with `passphrase`. */
   signInWithSecretKey(input: string, passphrase: string): Promise<void>;
+  /**
+   * Sign in from a BIP-39 recovery phrase (NIP-06).
+   *
+   * Separate from `signInWithSecretKey` rather than another accepted format,
+   * because the failures are different and must be reported differently: a bad
+   * `nsec` cannot be decoded at all, while a mistyped phrase word *derives a
+   * perfectly valid key for the wrong account* unless the checksum is checked
+   * first. Merging them would flatten that into "invalid key".
+   */
+  signInWithSeedPhrase(phrase: string, passphrase: string): Promise<void>;
   /** Create a brand-new identity. Returns the nsec **once**, for backup. */
   createIdentity(passphrase: string): Promise<{ nsec: string }>;
   /** Watch-only: browse as a pubkey without any signing capability. */
@@ -163,7 +184,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    * thing that could correlate to the wrong request.
    */
   const remote = useRef<RemoteConnection | undefined>(undefined);
+  const [signerHealth, setSignerHealth] = useState<
+    "alive" | "unreachable" | undefined
+  >();
   const closeRemote = useCallback(() => {
+    // Cleared here rather than left behind: a stale "unreachable" outliving the
+    // connection it described would tell a freshly signed-in local account that
+    // its signer is dead.
+    setSignerHealth(undefined);
     remote.current?.close();
     remote.current = undefined;
   }, []);
@@ -275,6 +303,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [adoptLocalSigner],
   );
 
+  const signInWithSeedPhrase = useCallback(
+    (phrase: string, passphrase: string) =>
+      seedPhraseSignIn(phrase, passphrase, adoptLocalSigner),
+    [adoptLocalSigner],
+  );
+
   const createIdentity = useCallback(
     async (passphrase: string) => {
       if (passphrase.length < 8) {
@@ -331,11 +365,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           remoteSigner: {
             pubkey: connection.remoteSignerPubkey,
             relays: [...connection.relays],
+            // Usually already known here: the handshake's own reply is a frame,
+            // so a `nostrconnect://` invite has observed the scheme before this
+            // runs. A `bunker://` connect may not have, which is what
+            // `rememberScheme` below is for.
+            ...(connection.observedScheme()
+              ? { scheme: connection.observedScheme() }
+              : {}),
           },
         },
         connection.signer,
         true,
       );
+      rememberScheme(connection);
     },
     [adopt, closeRemote],
   );
@@ -345,7 +387,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (passphrase.length < 8) {
         throw new Error("passphrase must be at least 8 characters");
       }
-      const connection = await connectToBunker(uri);
+      const connection = await connectToBunker(uri, undefined, setSignerHealth);
       adoptRemote(connection, passphrase);
     },
     [adoptRemote],
@@ -359,7 +401,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (passphrase.length < 8) {
         throw new Error("passphrase must be at least 8 characters");
       }
-      const invite = inviteRemoteSigner(relays);
+      const invite = inviteRemoteSigner(relays, undefined, setSignerHealth);
       return {
         uri: invite.uri,
         completed: invite.connection.then((connection) => {
@@ -406,14 +448,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // offline must not be reported as a bad passphrase, so that failure *throws*
         // with its own message — the two have completely different remedies.
         if (!clientSecret) return false;
-        const connection = await resumeBunker({
-          clientSecret,
-          remoteSignerPubkey: stored.remoteSigner.pubkey,
-          relays: stored.remoteSigner.relays,
-          userPubkey: stored.pubkey as Hex32,
-        });
+        const connection = await resumeBunker(
+          {
+            clientSecret,
+            remoteSignerPubkey: stored.remoteSigner.pubkey,
+            relays: stored.remoteSigner.relays,
+            userPubkey: stored.pubkey as Hex32,
+            // Skips the NIP-04 probe's 8-second silence for a signer this device
+            // has already talked to. Absent on a record written before the field
+            // existed, which simply means the probe runs as it always did.
+            ...(stored.remoteSigner.scheme
+              ? { scheme: stored.remoteSigner.scheme }
+              : {}),
+          },
+          undefined,
+          setSignerHealth,
+        );
         closeRemote();
         remote.current = connection;
+        // A record written before this field existed, or one whose scheme was
+        // still unknown at sign-in, learns it here — so the probe is paid once
+        // ever rather than once per reload.
+        rememberScheme(connection);
         setLocked(undefined);
         setSession({
           signer: connection.signer,
@@ -591,9 +647,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       session,
       locked,
       nip07Available,
+      signerHealth,
       accounts,
       signInWithExtension,
       signInWithSecretKey,
+      signInWithSeedPhrase,
       createIdentity,
       signInReadonly,
       signInWithBunker,
@@ -609,9 +667,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       session,
       locked,
       nip07Available,
+      signerHealth,
       accounts,
       signInWithExtension,
       signInWithSecretKey,
+      signInWithSeedPhrase,
       createIdentity,
       signInReadonly,
       signInWithBunker,

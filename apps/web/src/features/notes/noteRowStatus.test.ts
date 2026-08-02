@@ -128,3 +128,52 @@ describe("noteRowStatuses", () => {
     expect(statuses.get(OTHER)?.pending).toBe("zap");
   });
 });
+
+describe("mining attribution", () => {
+  const MINING = {
+    targetBits: 20,
+    hashes: 1_400_000,
+    elapsedMs: 6_000,
+    budgetMs: 21_000,
+  } as const;
+
+  it("attaches mining to the row that is acting", () => {
+    // The gap this closes: at difficulty 20 a like hashes for ~10s behind the
+    // ordinary spinner, which reads as a relay that stopped answering.
+    const statuses = noteRowStatuses(
+      sources({
+        actions: new Map([[NOTE, { status: "working", action: "react" }]]),
+        mining: MINING,
+        onSkipMining: () => {},
+      }),
+    );
+    expect(statuses.get(NOTE)?.mining).toEqual(MINING);
+    expect(statuses.get(NOTE)?.onSkipMining).toBeTypeOf("function");
+  });
+
+  it("never attributes mining to a row that is only showing a notice", () => {
+    // One publisher serves every note action, so mining belongs to the row with
+    // a pending control. Painting it on a row that merely copied a link would be
+    // work attributed to a row that is not doing it.
+    const statuses = noteRowStatuses(
+      sources({
+        notices: new Map([[OTHER, "Link copied"]]),
+        mining: MINING,
+        onSkipMining: () => {},
+      }),
+    );
+    expect(statuses.get(OTHER)?.notice).toBe("Link copied");
+    expect(statuses.get(OTHER)?.mining).toBeUndefined();
+  });
+
+  it("omits the skip handler when nothing is mining", () => {
+    const statuses = noteRowStatuses(
+      sources({
+        actions: new Map([[NOTE, { status: "working", action: "react" }]]),
+        onSkipMining: () => {},
+      }),
+    );
+    expect(statuses.get(NOTE)?.pending).toBe("react");
+    expect(statuses.get(NOTE)?.onSkipMining).toBeUndefined();
+  });
+});

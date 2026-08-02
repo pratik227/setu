@@ -38,6 +38,7 @@ import {
 import { LiveFeed } from "../features/feed/LiveFeed";
 import { LoginScreen, UnlockDialog } from "../features/identity/LoginScreen";
 import { useSession } from "../features/identity/SessionProvider";
+import { SignerHealthNotice } from "../features/identity/SignerHealthNotice";
 import { useFollowAction } from "../features/identity/useFollowAction";
 import { useFollows } from "../features/identity/useFollows";
 import { useMuteIngest } from "../features/moderation/useMuteIngest";
@@ -410,6 +411,11 @@ export function App() {
         />
 
         <ContentSurface>
+          {/* Above the header and every route: a signer that has gone away
+              affects the whole app, not one surface, and a reader must not have
+              to be on a particular screen to find out. Renders nothing unless a
+              remote signer is actually unreachable. */}
+          <SignerHealthNotice />
           {!session ? (
             <LoginScreen />
           ) : (

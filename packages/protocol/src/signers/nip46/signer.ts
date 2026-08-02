@@ -272,6 +272,18 @@ export class Nip46Signer implements NostrSigner {
   }
 
   /**
+   * The content encryption this peer has been *observed* to use, if any.
+   *
+   * `undefined` until a frame has actually been decrypted from it — this is
+   * evidence, never the scheme we happen to be sending in. A host persists it so a
+   * later session can skip the 8-second silence the NIP-04 probe waits out; see
+   * {@link Nip46SignerOptions.peerScheme}, which is where it comes back in.
+   */
+  get observedScheme(): Nip46Scheme | undefined {
+    return this.peerScheme;
+  }
+
+  /**
    * Open a *new* connection: `connect`, then learn who we are.
    *
    * `secret` is the one-time token from the `bunker://` URI. It is used here and

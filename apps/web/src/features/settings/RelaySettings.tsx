@@ -31,7 +31,7 @@ export function RelaySection() {
   // it. What a relay ADVERTISES is already on the row — this is what it DID.
   const delivery = useRelayDelivery();
   const engine = useEngine();
-  const { publish, state } = usePublish();
+  const { publish, state, skipMining } = usePublish();
   const { event, absenceConfirmed } = useOwnReplaceable(Kind.RelayList);
   const [draft, setDraft] = useState<RelayEntry[] | undefined>();
   const [added, setAdded] = useState("");
@@ -227,6 +227,7 @@ export function RelaySection() {
               state={state}
               onSave={() => void save()}
               onDismiss={() => setError(undefined)}
+              onSkipMining={skipMining}
             />
           </>
         )}
@@ -265,7 +266,7 @@ const SUGGESTED_DM_RELAYS = [
 ] as const;
 
 export function DmRelaySection() {
-  const { publish, state } = usePublish();
+  const { publish, state, skipMining } = usePublish();
   const { event, absenceConfirmed } = useOwnReplaceable(
     Kind.DirectMessageRelays,
   );
@@ -400,6 +401,7 @@ export function DmRelaySection() {
               state={state}
               onSave={() => void save()}
               onDismiss={() => setError(undefined)}
+              onSkipMining={skipMining}
             />
           </>
         )}

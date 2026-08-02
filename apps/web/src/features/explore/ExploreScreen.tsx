@@ -6,11 +6,19 @@ import {
   TabList,
   tabPanelProps,
 } from "@setu/ui";
-import { Hash, Image as ImageIcon, Layers, Users, Zap } from "lucide-react";
+import {
+  Hash,
+  Image as ImageIcon,
+  Layers,
+  UserPlus,
+  Users,
+  Zap,
+} from "lucide-react";
 import { useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
 import { FeedsTab } from "./FeedsTab";
 import { MediaTab } from "./MediaTab";
+import { PacksTab } from "./PacksTab";
 import { PeopleTab } from "./PeopleTab";
 import { TopicsTab } from "./TopicsTab";
 import { ZapsTab } from "./ZapsTab";
@@ -31,12 +39,22 @@ import { ZapsTab } from "./ZapsTab";
  * reader has to be able to tell a broken client from a quiet one.
  */
 
-const TAB_IDS = ["feeds", "people", "zaps", "media", "topics"] as const;
+const TAB_IDS = [
+  "feeds",
+  "people",
+  "packs",
+  "zaps",
+  "media",
+  "topics",
+] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TABS: readonly TabDefinition[] = [
   { id: "feeds", label: "Feeds", icon: <Layers /> },
   { id: "people", label: "People", icon: <Users /> },
+  // First after Feeds among the people-finding tabs: it is the only one that
+  // turns an empty follow list into a populated feed in a single action.
+  { id: "packs", label: "Packs", icon: <UserPlus /> },
   { id: "zaps", label: "Zaps", icon: <Zap /> },
   { id: "media", label: "Media", icon: <ImageIcon /> },
   { id: "topics", label: "Topics", icon: <Hash /> },
@@ -86,6 +104,7 @@ export function ExploreScreen({
           <FeedsTab relays={engine.relays} onOpenFeed={onOpenFeed} />
         ) : null}
         {tab === "people" ? <PeopleTab onOpenProfile={onOpenProfile} /> : null}
+        {tab === "packs" ? <PacksTab onOpenProfile={onOpenProfile} /> : null}
         {tab === "zaps" ? (
           <ZapsTab onOpenThread={onOpenThread} onOpenProfile={onOpenProfile} />
         ) : null}

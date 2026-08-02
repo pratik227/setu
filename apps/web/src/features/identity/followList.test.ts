@@ -1,9 +1,11 @@
-import type { NostrEvent } from "@setu/protocol";
+import type { Hex32, NostrEvent } from "@setu/protocol";
 import { describe, expect, it } from "vitest";
 import {
   editFollowList,
   followedPubkeys,
+  followManyEdit,
   followsPubkey,
+  isPlausibleBulkFollow,
   isPlausibleFollowWrite,
 } from "./followList";
 
@@ -146,8 +148,8 @@ describe("editFollowList — preservation", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.template.tags).toContainEqual(["t", "nostr"]);
-    expect(result.template.tags).toContainEqual([
+    expect(result.template.tags ?? []).toContainEqual(["t", "nostr"]);
+    expect(result.template.tags ?? []).toContainEqual([
       "relay",
       "wss://kept.example",
     ]);
@@ -168,7 +170,12 @@ describe("editFollowList — preservation", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(pTags(result.template.tags ?? [])).toEqual([ALICE, CAROL]);
-    expect(result.template.tags).toContainEqual(["p", ALICE, "", "Alice"]);
+    expect(result.template.tags ?? []).toContainEqual([
+      "p",
+      ALICE,
+      "",
+      "Alice",
+    ]);
   });
 
   it("removes every duplicate entry for the unfollowed pubkey", () => {
@@ -249,5 +256,117 @@ describe("isPlausibleFollowWrite", () => {
         tags: [["p", ALICE]],
       }),
     ).toBe(true);
+  });
+});
+
+describe("followManyEdit", () => {
+  const PACK = ["1".repeat(64), "2".repeat(64), "3".repeat(64)] as Hex32[];
+
+  it("adds every new member in a single event", () => {
+    // The bug a loop would produce: N events that each add one and drop the rest,
+    // leaving the account following exactly one of the pack's members.
+    const result = followManyEdit({
+      current: undefined,
+      absenceConfirmed: true,
+      targets: PACK,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const added = (result.template.tags ?? []).filter((t) => t[0] === "p");
+    expect(added).toHaveLength(3);
+  });
+
+  it("keeps existing follows and unknown tags byte-for-byte", () => {
+    const current = contacts([
+      ["p", "9".repeat(64)],
+      ["client", "something"],
+    ]);
+    const result = followManyEdit({
+      current,
+      absenceConfirmed: true,
+      targets: PACK,
+    });
+    if (!result.ok) throw new Error("refused");
+    expect(result.template.tags ?? []).toContainEqual(["p", "9".repeat(64)]);
+    expect(result.template.tags ?? []).toContainEqual(["client", "something"]);
+    // kind-3 content historically carried a relay map; dropping it is data loss.
+    expect(result.template.content).toBe(current.content);
+  });
+
+  it("skips members already followed", () => {
+    const current = contacts([["p", PACK[0] as string]]);
+    const result = followManyEdit({
+      current,
+      absenceConfirmed: true,
+      targets: PACK,
+    });
+    if (!result.ok) throw new Error("refused");
+    expect(
+      (result.template.tags ?? []).filter((t) => t[0] === "p"),
+    ).toHaveLength(3);
+  });
+
+  it("refuses when everyone is already followed", () => {
+    const current = contacts(PACK.map((p) => ["p", p]));
+    const result = followManyEdit({
+      current,
+      absenceConfirmed: true,
+      targets: PACK,
+    });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason).toBe("no-change");
+  });
+
+  it("refuses to create a list from an unconfirmed absence", () => {
+    // Indistinguishable, afterwards, from having unfollowed everyone.
+    const result = followManyEdit({
+      current: undefined,
+      absenceConfirmed: false,
+      targets: PACK,
+    });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason).toBe("unverified-absence");
+  });
+
+  it("deduplicates a pack that names someone twice", () => {
+    const result = followManyEdit({
+      current: undefined,
+      absenceConfirmed: true,
+      targets: [PACK[0] as Hex32, PACK[0] as Hex32],
+    });
+    if (!result.ok) throw new Error("refused");
+    expect(
+      (result.template.tags ?? []).filter((t) => t[0] === "p"),
+    ).toHaveLength(1);
+  });
+});
+
+describe("isPlausibleBulkFollow", () => {
+  it("allows a large addition", () => {
+    // Unlike a single follow, a pack legitimately moves the count by many.
+    const current = contacts([["p", "9".repeat(64)]]);
+    const result = followManyEdit({
+      current,
+      absenceConfirmed: true,
+      targets: ["1".repeat(64), "2".repeat(64)] as Hex32[],
+    });
+    if (!result.ok) throw new Error("refused");
+    expect(isPlausibleBulkFollow(current, result.template)).toBe(true);
+  });
+
+  it("refuses a write that would remove anybody", () => {
+    // Applying a pack is purely additive; a shrinking count is a merge bug, and
+    // publishing it would unfollow people the user never touched.
+    const current = contacts([
+      ["p", "8".repeat(64)],
+      ["p", "9".repeat(64)],
+    ]);
+    const shrunk = {
+      kind: 3,
+      content: "",
+      created_at: 1,
+      tags: [["p", "8".repeat(64)]],
+    };
+    expect(isPlausibleBulkFollow(current, shrunk)).toBe(false);
   });
 });

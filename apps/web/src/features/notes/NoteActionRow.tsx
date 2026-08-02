@@ -10,6 +10,8 @@ import {
   Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import type { MiningProgress } from "../compose/pow";
+import { miningLabel } from "../compose/pow";
 import { mutedCountNotice } from "./interactionCounts";
 import { countLabel } from "./relativeTime";
 import type { NoteView } from "./types";
@@ -97,6 +99,19 @@ export interface NoteRowStatus {
   /** Transient confirmation — "Link copied", "Invoice handed off". */
   readonly notice?: string;
   readonly error?: string;
+  /**
+   * Proof of work being mined for this row's action, when any is.
+   *
+   * A like at difficulty 20 spends about ten seconds hashing before it is even
+   * signed. Without this the row shows the ordinary pending spinner for all of
+   * it, which is indistinguishable from a relay that has stopped answering — so
+   * the reader's conclusion is "Setu is broken" rather than "the setting I chose
+   * costs this much". The composer has said so since PoW landed; every other
+   * write path was silent.
+   */
+  readonly mining?: MiningProgress;
+  /** Publish without finishing the work. Present only while mining. */
+  readonly onSkipMining?: () => void;
 }
 
 /** The controls in the row, as far as busy/pending state is concerned. */
@@ -324,6 +339,20 @@ export function NoteActionRow({
 
       <MutedCountNotice note={note} />
 
+      {status?.mining ? (
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-2xs text-muted-foreground">
+          <span>{miningLabel(status.mining)}</span>
+          {status.onSkipMining ? (
+            <button
+              type="button"
+              onClick={status.onSkipMining}
+              className="underline hover:no-underline"
+            >
+              Skip
+            </button>
+          ) : null}
+        </p>
+      ) : null}
       {status?.notice ? (
         <p className="mt-1 text-2xs break-all text-muted-foreground">
           {status.notice}

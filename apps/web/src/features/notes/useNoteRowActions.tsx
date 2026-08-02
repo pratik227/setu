@@ -242,8 +242,18 @@ export function useNoteRowActions(
         notices,
         zaps: zapStates,
         bookmark: bookmarkState,
+        mining: noteActions.mining,
+        onSkipMining: noteActions.skipMining,
       }),
-    [actionStates, bookmarkState, notices, shareBusy, zapStates],
+    [
+      actionStates,
+      bookmarkState,
+      notices,
+      shareBusy,
+      zapStates,
+      noteActions.mining,
+      noteActions.skipMining,
+    ],
   );
 
   const renderReplyComposer = useCallback(

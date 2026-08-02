@@ -92,6 +92,15 @@ export interface RemoteConnection {
    * dead connection from costing the user a full request deadline per attempt.
    */
   health(): RemoteHealth;
+  /**
+   * The scheme this signer has been observed to speak, for persisting.
+   *
+   * A function for the same reason `health` is: it is `undefined` until the first
+   * frame comes back, which is after sign-in returns. A caller that read it as a
+   * value at connect time would persist "unknown" forever and the probe would be
+   * paid on every resume — the exact cost this exists to remove.
+   */
+  observedScheme(): "nip04" | "nip44" | undefined;
   close(): void;
 }
 
@@ -108,6 +117,7 @@ function pair(
     relays: signer.relays,
     userPubkey,
     health: () => signer.health,
+    observedScheme: () => signer.observedScheme,
     close: () => {
       signer.close();
       transport.close();
@@ -164,6 +174,14 @@ export interface ResumeBunkerInput {
   readonly relays: readonly string[];
   /** The account we expect; a signer answering for another is refused. */
   readonly userPubkey: Hex32;
+  /**
+   * Scheme observed in a previous session, when one was stored.
+   *
+   * Skips the NIP-04 probe's 8-second silence on the first request after a reload.
+   * Safe to be wrong: the codec still decrypts replies by shape, so a stale value
+   * costs one mis-encrypted request and is corrected by the next frame that arrives.
+   */
+  readonly scheme?: "nip04" | "nip44";
 }
 
 /**
@@ -186,6 +204,7 @@ export async function resumeBunker(
       relays: input.relays,
       userPubkey: input.userPubkey,
       keepAliveMs: KEEPALIVE_MS,
+      ...(input.scheme ? { peerScheme: input.scheme } : {}),
       onHealth,
       onAuthChallenge: (url) =>
         onError(`the remote signer wants approval: ${url}`),

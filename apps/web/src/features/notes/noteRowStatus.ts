@@ -15,6 +15,7 @@
  * objects per tick and defeat the memoisation this exists to enable.
  */
 
+import type { MiningProgress } from "../compose/pow";
 import type { NoteActionControl, NoteRowStatus } from "./NoteActionRow";
 import type { BookmarkActionState } from "./useBookmarks";
 import type { NoteActionState } from "./useNoteActions";
@@ -33,12 +34,22 @@ export interface NoteRowStatusSources {
    * toggle names the note it was about or every row would show the message.
    */
   readonly bookmark: BookmarkActionState;
+  /**
+   * Proof of work in flight, and how to abandon it.
+   *
+   * Attached to whichever row is *pending*, because a single publisher serves
+   * every note action — so the mining that is happening belongs to the one row
+   * already showing a spinner, and showing it on any other would be a lie.
+   */
+  readonly mining?: MiningProgress | undefined;
+  readonly onSkipMining?: (() => void) | undefined;
 }
 
 export function noteRowStatuses(
   sources: NoteRowStatusSources,
 ): ReadonlyMap<string, NoteRowStatus> {
-  const { shareBusy, actions, notices, zaps, bookmark } = sources;
+  const { shareBusy, actions, notices, zaps, bookmark, mining, onSkipMining } =
+    sources;
 
   const ids = new Set<string>([
     ...shareBusy,
@@ -80,10 +91,17 @@ export function noteRowStatuses(
     if (pending === undefined && notice === undefined && error === undefined) {
       continue;
     }
+    // Only the acting row: `pending` is what identifies it, and mining without a
+    // pending control would be work attributed to a row that is not doing it.
+    const rowMining = pending !== undefined ? mining : undefined;
     statuses.set(noteId, {
       ...(pending !== undefined ? { pending } : {}),
       ...(notice !== undefined ? { notice } : {}),
       ...(error !== undefined ? { error } : {}),
+      ...(rowMining !== undefined ? { mining: rowMining } : {}),
+      ...(rowMining !== undefined && onSkipMining !== undefined
+        ? { onSkipMining }
+        : {}),
     });
   }
   return statuses;

@@ -180,7 +180,7 @@ const PROFILE_FIELDS: readonly {
 
 function ProfileSection() {
   const { session } = useSession();
-  const { publish, state } = usePublish();
+  const { publish, state, skipMining } = usePublish();
   const { event, absenceConfirmed } = useOwnReplaceable(Kind.Metadata);
   const [draft, setDraft] = useState<ProfileFields | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -256,6 +256,7 @@ function ProfileSection() {
               state={state}
               onSave={() => void save()}
               onDismiss={() => setError(undefined)}
+              onSkipMining={skipMining}
             />
           </>
         )}
