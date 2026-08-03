@@ -75,6 +75,12 @@ export interface ExploreScreenProps {
   onOpenProfile?(pubkey: string): void;
   onOpenHashtag?(tag: string): void;
   onOpenCommunity?(address: string): void;
+  /**
+   * Which tab to open on. Comes from the route, so a sidebar entry can deep-link
+   * straight to Packs or Communities instead of dropping the reader on Feeds and
+   * making them find it.
+   */
+  initialTab?: string;
   onOpenFeed?(definition: FeedDefinition, label: string): void;
 }
 
@@ -84,9 +90,25 @@ export function ExploreScreen({
   onOpenHashtag,
   onOpenFeed,
   onOpenCommunity,
+  initialTab,
 }: ExploreScreenProps) {
   const engine = useEngine();
-  const [tab, setTab] = useState<TabId>("feeds");
+  const [tab, setTab] = useState<TabId>(
+    isTabId(initialTab ?? "") ? (initialTab as TabId) : "feeds",
+  );
+
+  /*
+   * Follow the route when it names a different tab.
+   *
+   * Reset during render rather than in an effect: the sidebar navigates straight
+   * to a tab, and an effect would paint Feeds for one frame first — which looks
+   * like the click went to the wrong place.
+   */
+  const [routedTab, setRoutedTab] = useState(initialTab);
+  if (routedTab !== initialTab) {
+    setRoutedTab(initialTab);
+    if (isTabId(initialTab ?? "")) setTab(initialTab as TabId);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

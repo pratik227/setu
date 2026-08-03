@@ -103,6 +103,8 @@ export const Kind = {
   DirectMessageRelays: 10050,
   /** NIP-51 bookmarks (replaceable). */
   Bookmarks: 10003,
+  /** NIP-51 community list — the NIP-72 communities you follow (replaceable). */
+  CommunityList: 10004,
   /** BUD-03 Blossom server list (replaceable). */
   BlossomServerList: 10063,
   /** NIP-51 follow sets (addressable). */

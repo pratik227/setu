@@ -9,7 +9,7 @@
 
 export type Route =
   | { readonly name: "home" }
-  | { readonly name: "explore" }
+  | { readonly name: "explore"; readonly tab?: string }
   | { readonly name: "reads" }
   | { readonly name: "messages" }
   | { readonly name: "articles" }
@@ -20,6 +20,7 @@ export type Route =
   | { readonly name: "about" }
   | { readonly name: "hashtag"; readonly tag: string }
   | { readonly name: "community"; readonly address: string }
+  | { readonly name: "communities" }
   | { readonly name: "profile"; readonly pubkey: string }
   | { readonly name: "settings" };
 
@@ -36,6 +37,7 @@ export const ROUTE_TITLES: Record<Route["name"], string> = {
   about: "About Setu",
   hashtag: "Hashtag",
   community: "Community",
+  communities: "Communities",
   profile: "Profile",
   settings: "Settings",
 };
@@ -53,5 +55,8 @@ export function sameRoute(a: Route, b: Route): boolean {
     return a.pubkey === b.pubkey;
   if (a.name === "community" && b.name === "community")
     return a.address === b.address;
+  // The tab is part of the destination: two Explore routes on different tabs are
+  // different places, and treating them as one breaks both back and highlighting.
+  if (a.name === "explore" && b.name === "explore") return a.tab === b.tab;
   return true;
 }
