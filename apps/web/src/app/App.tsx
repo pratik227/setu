@@ -122,6 +122,11 @@ const SettingsScreen = lazy(() =>
     default: m.SettingsScreen,
   })),
 );
+const CommunitiesScreen = lazy(() =>
+  import("../features/communities/CommunitiesScreen").then((m) => ({
+    default: m.CommunitiesScreen,
+  })),
+);
 const CommunityScreen = lazy(() =>
   import("../features/communities/CommunityScreen").then((m) => ({
     default: m.CommunityScreen,
@@ -480,6 +485,9 @@ export function App() {
                   onOpenProfile={openProfile}
                   onOpenHashtag={openHashtag}
                   onOpenCommunity={openCommunity}
+                  {...(route.name === "explore" && route.tab
+                    ? { initialTab: route.tab }
+                    : {})}
                   onOpenFeed={(definition, label) => {
                     setCustomFeed({ definition, label });
                     nav.go({ name: "home" });
@@ -556,6 +564,13 @@ export function App() {
                 <SettingsScreen />
               ) : route.name === "messages" ? (
                 <ChatScreen onOpenProfile={openProfile} />
+              ) : route.name === "communities" ? (
+                <CommunitiesScreen
+                  onOpenCommunity={openCommunity}
+                  onBrowse={() =>
+                    nav.go({ name: "explore", tab: "communities" })
+                  }
+                />
               ) : route.name === "community" ? (
                 <CommunityScreen
                   address={route.address}

@@ -20,21 +20,49 @@ import {
   Compass,
   Hash,
   Home,
+  Image as ImageIcon,
   Info,
+  Layers,
   MessageCircle,
   PenLine,
   PenSquare,
   Search,
   Settings,
   User,
+  UserPlus,
+  Users,
+  UsersRound,
   Wallet,
   X,
+  Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { AccountMenu } from "../identity/AccountSwitcher";
 import { useSession } from "../identity/SessionProvider";
 import { useAuthors } from "../profiles/useAuthors";
 import { type Route, sameRoute } from "./routes";
+
+/**
+ * Explore's tabs, mirrored into the sidebar.
+ *
+ * Kept in step with `ExploreScreen`'s `TAB_IDS` by hand rather than imported: the
+ * sidebar lives in the shell and importing a screen's internals to render a nav
+ * would make the shell depend on the surface it navigates to. A tab added there
+ * and forgotten here is simply not listed — a missing shortcut, not a broken one.
+ */
+const EXPLORE_TABS: readonly {
+  id: string;
+  label: string;
+  icon: ReactNode;
+}[] = [
+  { id: "feeds", label: "Feeds", icon: <Layers /> },
+  { id: "people", label: "People", icon: <Users /> },
+  { id: "packs", label: "Packs", icon: <UserPlus /> },
+  { id: "communities", label: "Discover communities", icon: <UsersRound /> },
+  { id: "zaps", label: "Zaps", icon: <Zap /> },
+  { id: "media", label: "Media", icon: <ImageIcon /> },
+  { id: "topics", label: "Topics", icon: <Hash /> },
+];
 
 export interface SetuSidebarProps {
   route: Route;
@@ -66,6 +94,7 @@ export function SetuSidebar({
 }: SetuSidebarProps) {
   const { session } = useSession();
   const [tagsOpen, setTagsOpen] = useState(true);
+  const [exploreOpen, setExploreOpen] = useState(true);
 
   const authors = useAuthors(session ? [session.pubkey] : []);
   const me = session ? authors.get(session.pubkey) : undefined;
@@ -146,6 +175,17 @@ export function SetuSidebar({
         >
           Bookmarks
         </SidebarRow>
+        {/* The communities you are in. Discovery lives under Explore; this row is
+            the ones you joined — the same split Wallet has, and the reason it is
+            not a second door to the browse list. */}
+        <SidebarRow
+          icon={<UsersRound />}
+          size="lg"
+          active={sameRoute(route, { name: "communities" })}
+          onClick={() => onNavigate({ name: "communities" })}
+        >
+          Communities
+        </SidebarRow>
         {/* A destination of its own rather than a panel inside Settings. A wallet is
             something you check, not something you configure once — and a balance
             buried three scrolls into a settings page is a balance nobody looks at. */}
@@ -197,6 +237,32 @@ export function SetuSidebar({
       </div>
 
       <ScrollArea className="px-2">
+        {/*
+         * Explore's tabs, listed.
+         *
+         * Seven discovery surfaces used to sit behind one nav row with nothing to
+         * say they existed — a reader had to open Explore and notice a tab strip.
+         * Listing them here costs one collapsible section and makes them
+         * findable; each entry deep-links straight to its tab rather than
+         * dropping the reader on Feeds to hunt for it.
+         */}
+        <SidebarSection
+          label="Explore"
+          open={exploreOpen}
+          onToggle={() => setExploreOpen((v) => !v)}
+        >
+          {EXPLORE_TABS.map((entry) => (
+            <SidebarRow
+              key={entry.id}
+              icon={entry.icon}
+              active={sameRoute(route, { name: "explore", tab: entry.id })}
+              onClick={() => onNavigate({ name: "explore", tab: entry.id })}
+            >
+              {entry.label}
+            </SidebarRow>
+          ))}
+        </SidebarSection>
+
         {pinnedHashtags.length > 0 ? (
           <SidebarSection
             label="Hashtags"
