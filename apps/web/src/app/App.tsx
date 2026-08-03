@@ -122,6 +122,11 @@ const SettingsScreen = lazy(() =>
     default: m.SettingsScreen,
   })),
 );
+const CommunityScreen = lazy(() =>
+  import("../features/communities/CommunityScreen").then((m) => ({
+    default: m.CommunityScreen,
+  })),
+);
 const WalletScreen = lazy(() =>
   import("../features/wallet/WalletScreen").then((m) => ({
     default: m.WalletScreen,
@@ -331,6 +336,11 @@ export function App() {
     [],
   );
 
+  const openCommunity = useCallback(
+    (address: string) => navRef.current.go({ name: "community", address }),
+    [],
+  );
+
   useSearchHotkey(() => setSearching(true));
 
   /*
@@ -469,6 +479,7 @@ export function App() {
                   onOpenThread={openThread}
                   onOpenProfile={openProfile}
                   onOpenHashtag={openHashtag}
+                  onOpenCommunity={openCommunity}
                   onOpenFeed={(definition, label) => {
                     setCustomFeed({ definition, label });
                     nav.go({ name: "home" });
@@ -545,6 +556,13 @@ export function App() {
                 <SettingsScreen />
               ) : route.name === "messages" ? (
                 <ChatScreen onOpenProfile={openProfile} />
+              ) : route.name === "community" ? (
+                <CommunityScreen
+                  address={route.address}
+                  onOpenThread={openThread}
+                  onOpenProfile={openProfile}
+                  onOpenHashtag={openHashtag}
+                />
               ) : route.name === "wallet" ? (
                 <WalletScreen />
               ) : route.name === "about" ? (

@@ -19,6 +19,7 @@ export type Route =
   | { readonly name: "wallet" }
   | { readonly name: "about" }
   | { readonly name: "hashtag"; readonly tag: string }
+  | { readonly name: "community"; readonly address: string }
   | { readonly name: "profile"; readonly pubkey: string }
   | { readonly name: "settings" };
 
@@ -34,6 +35,7 @@ export const ROUTE_TITLES: Record<Route["name"], string> = {
   wallet: "Wallet",
   about: "About Setu",
   hashtag: "Hashtag",
+  community: "Community",
   profile: "Profile",
   settings: "Settings",
 };
@@ -49,5 +51,7 @@ export function sameRoute(a: Route, b: Route): boolean {
   if (a.name === "hashtag" && b.name === "hashtag") return a.tag === b.tag;
   if (a.name === "profile" && b.name === "profile")
     return a.pubkey === b.pubkey;
+  if (a.name === "community" && b.name === "community")
+    return a.address === b.address;
   return true;
 }

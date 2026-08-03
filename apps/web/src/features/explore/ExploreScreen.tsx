@@ -12,10 +12,12 @@ import {
   Layers,
   UserPlus,
   Users,
+  UsersRound,
   Zap,
 } from "lucide-react";
 import { useState } from "react";
 import { useEngine } from "../../engine/EngineProvider";
+import { CommunitiesTab } from "./CommunitiesTab";
 import { FeedsTab } from "./FeedsTab";
 import { MediaTab } from "./MediaTab";
 import { PacksTab } from "./PacksTab";
@@ -43,6 +45,7 @@ const TAB_IDS = [
   "feeds",
   "people",
   "packs",
+  "communities",
   "zaps",
   "media",
   "topics",
@@ -55,6 +58,7 @@ const TABS: readonly TabDefinition[] = [
   // First after Feeds among the people-finding tabs: it is the only one that
   // turns an empty follow list into a populated feed in a single action.
   { id: "packs", label: "Packs", icon: <UserPlus /> },
+  { id: "communities", label: "Communities", icon: <UsersRound /> },
   { id: "zaps", label: "Zaps", icon: <Zap /> },
   { id: "media", label: "Media", icon: <ImageIcon /> },
   { id: "topics", label: "Topics", icon: <Hash /> },
@@ -70,6 +74,7 @@ export interface ExploreScreenProps {
   onOpenThread?(id: string): void;
   onOpenProfile?(pubkey: string): void;
   onOpenHashtag?(tag: string): void;
+  onOpenCommunity?(address: string): void;
   onOpenFeed?(definition: FeedDefinition, label: string): void;
 }
 
@@ -78,6 +83,7 @@ export function ExploreScreen({
   onOpenProfile,
   onOpenHashtag,
   onOpenFeed,
+  onOpenCommunity,
 }: ExploreScreenProps) {
   const engine = useEngine();
   const [tab, setTab] = useState<TabId>("feeds");
@@ -105,6 +111,9 @@ export function ExploreScreen({
         ) : null}
         {tab === "people" ? <PeopleTab onOpenProfile={onOpenProfile} /> : null}
         {tab === "packs" ? <PacksTab onOpenProfile={onOpenProfile} /> : null}
+        {tab === "communities" && onOpenCommunity ? (
+          <CommunitiesTab onOpenCommunity={onOpenCommunity} />
+        ) : null}
         {tab === "zaps" ? (
           <ZapsTab onOpenThread={onOpenThread} onOpenProfile={onOpenProfile} />
         ) : null}

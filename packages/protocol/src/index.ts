@@ -172,6 +172,22 @@ export type { PicturePost } from "./nip68";
 export { parsePicture } from "./nip68";
 export type { VideoPost } from "./nip71";
 export { isVideoKind, parseVideo } from "./nip71";
+export type { Community, CommunityApproval, CommunityRelays } from "./nip72";
+export {
+  approvalApplies,
+  approvedPost,
+  buildApproval,
+  COMMUNITY_APPROVAL_KIND,
+  COMMUNITY_KIND,
+  COMMUNITY_POST_KINDS,
+  claimedCommunities,
+  communityAddress,
+  isModerator,
+  newestCommunities,
+  parseApproval,
+  parseCommunity,
+  tagForCommunity,
+} from "./nip72";
 export type { ParsedAppData } from "./nip78";
 export {
   APP_DATA_KIND,
