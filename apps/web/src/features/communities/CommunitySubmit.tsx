@@ -38,8 +38,8 @@ export function CommunitySubmit({
   if (!session?.canSign) {
     return (
       <p className="border-b border-border/50 px-4 py-2.5 text-2xs text-muted-foreground">
-        This is a read-only session, so you cannot post here. Reading a
-        community needs no key.
+        This is a read-only session, so you cannot post here or join. Both
+        publish an event under your key. Reading a community needs no key.
       </p>
     );
   }
